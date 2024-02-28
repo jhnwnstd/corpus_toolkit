@@ -85,7 +85,7 @@ def log_results(corpus_name, results):
         logger.info(result)
 
 # Example usage
-corpora = ['brown', 'gutenberg', 'inaugural', 'reuters', 'webtext']
+corpora = ['brown']
 plots_to_generate = ["zipf", "heaps", "zipf_mandelbrot", "entropy"]
 
 for corpus in corpora:
