@@ -50,6 +50,15 @@ Python toolkit for textual analysis and visualization. Features include corpus t
   - `calculate_zipf_mandelbrot()`: Fits the Zipf-Mandelbrot distribution to the corpus.
 - **Inheritance**: Inherits from `CorpusTools`.
 
+### EntropyCalculator
+- **Purpose**: Calculates entropy for the letters in a text corpus. Designed around character-level entropy, it provides insights into the predictability and structure of the text.
+- **Key Methods**:
+  - `calculate_H0()`: Computes the maximum entropy for the corpus, assuming a uniform distribution of characters.
+  - `calculate_H1()`: Calculates first-order entropy by considering the predictability of characters given their uni-gram frequencies.
+  - `calculate_H3_kenlm()`: Utilizes KenLM models to estimate higher-order entropy, offering deeper insights into textual structure and predictability.
+  - `calculate_redundancy()`: Assesses the redundancy in the text by comparing the calculated entropy with the theoretical maximum entropy.
+- **Inheritance**: Inherits from `CorpusTools`, leveraging its functionalities for preprocessing and token management to facilitate entropy calculations.
+
 ### CorpusPlots
 - **Purpose**: Creates and saves plots related to corpus analysis.
 - **Key Methods**:
@@ -67,6 +76,7 @@ Python toolkit for textual analysis and visualization. Features include corpus t
 - NumPy package
 - Matplotlib package
 - SciPy package
+- KenLM (optional, for q-gram entropy calculations)
 
 ## Installation
 Install the required packages using pip:
