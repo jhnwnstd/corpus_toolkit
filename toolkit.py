@@ -1,6 +1,6 @@
 import logging
 from pathlib import Path
-from corpus_toolkit import AdvancedTools, CorpusLoader, CorpusPlots, EntropyCalculator, Tokenizer, CorpusTools
+from toolkit_methods import AdvancedTools, CorpusLoader, CorpusPlots, EntropyCalculator, Tokenizer, CorpusTools
 
 # Setup enhanced logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(message)s')
@@ -20,7 +20,7 @@ def load_and_tokenize_corpus(corpus_name):
 
 def corpus_tools(tokenized_corpus):
     logger.info("CorpusTools Analysis:")
-    corpus_analyzer = CorpusTools(tokenized_corpus)
+    corpus_analyzer = CorpusTools(tokenized_corpus, shuffle_tokens=True)
     
     median_token_info = corpus_analyzer.find_median_token()
     logger.info(f"  Median Token: {median_token_info['token']} (Frequency: {median_token_info['frequency']})")
