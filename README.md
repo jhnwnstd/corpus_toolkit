@@ -84,7 +84,58 @@ Install the required packages using pip:
 pip install nltk numpy matplotlib scipy
 ```
 
-## Examples
+### KenLM Installation (Optional)
+
+First, ensure you have the necessary system packages installed. This can be done from a terminal or included in a script that runs shell commands.
+
+```bash
+sudo apt-get update && sudo apt-get install -y cmake build-essential
+```
+  
+Then, you can use the following Python script to download and compile KenLM:
+```python
+from pathlib import Path
+import subprocess
+import wget
+import os
+
+def run_command(command):
+    """Run a shell command."""
+    process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    stdout, stderr = process.communicate()
+    if process.returncode != 0:
+        print(f"Error: {stderr}")
+    else:
+        print(stdout)
+
+def compile_kenlm(max_order=12):
+    # Download KenLM
+    url = "https://kheafield.com/code/kenlm.tar.gz"
+    kenlm_tar = wget.download(url)
+    print(f"Downloaded {kenlm_tar}")
+
+    # Extract KenLM archive
+    run_command(f"tar -xvzf {kenlm_tar}")
+
+    # Setup KenLM directory paths using pathlib
+    kenlm_dir = Path.cwd() / 'kenlm'
+    build_dir = kenlm_dir / 'build'
+    build_dir.mkdir(parents=True, exist_ok=True)
+
+    # Compile KenLM
+    os.chdir(build_dir)
+    run_command(f"cmake .. -DKENLM_MAX_ORDER={max_order}")
+    run_command("make -j 4")
+    os.chdir('../../')
+
+    # Clean up downloaded files
+    Path(kenlm_tar).unlink()
+
+# Compile KenLM with specified max order
+compile_kenlm(max_order=8) # Change max_order if needed
+```
+
+## Example Use
 ```python
 # Load a corpus
 loader = CorpusLoader('nltk_corpus_name')
