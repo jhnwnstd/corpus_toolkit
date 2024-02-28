@@ -135,7 +135,7 @@ def compile_kenlm(max_order=12):
 compile_kenlm(max_order=8) # Change max_order if needed
 ```
 
-## Example Use
+## Example Use (See toolkit.py for more expansive use demonstration)
 ```python
 # Load a corpus
 loader = CorpusLoader('nltk_corpus_name')
