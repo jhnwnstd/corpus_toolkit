@@ -3,7 +3,7 @@ from pathlib import Path
 from toolkit_methods import AdvancedTools, CorpusLoader, CorpusPlots, EntropyCalculator, Tokenizer, CorpusTools
 
 # Setup logging with detailed format including timestamp and logging level.
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 # Function to load and tokenize a corpus specified by its name.

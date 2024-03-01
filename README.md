@@ -1,5 +1,5 @@
 # corpus_toolkit
-Python toolkit for textual analysis and visualization. Features include corpus tokenization, lexical diversity calculation, vocabulary growth prediction, entropy measures, and Zipf/Heaps law visualizations. Designed for computational linguistics research.
+Python toolkit for textual analysis and visualization. Features include lexical diversity calculation, vocabulary growth prediction, entropy measures, and Zipf/Heaps law visualizations. Designed for computational linguistics research.
 
 ## Modules and Classes
 
@@ -93,6 +93,7 @@ sudo apt-get update && sudo apt-get install -y cmake build-essential
 ```
   
 Then, you can use the following Python script to download and compile KenLM:
+
 ```python
 from pathlib import Path
 import subprocess
@@ -135,7 +136,7 @@ def compile_kenlm(max_order=12):
 compile_kenlm(max_order=8) # Change max_order if needed
 ```
 
-## Example Use (See toolkit.py for more expansive use demonstration)
+## Example Use (See toolkit_brown_analysis.py for more expansive use demonstration)
 ```python
 # Load a corpus
 loader = CorpusLoader('nltk_corpus_name')
@@ -160,8 +161,9 @@ plotter.plot_zipfs_law_fit()
 
 ## Detailed Functionalities
 
-- **Corpus Loading**: Handles diverse sources, including local directories and NLTK datasets. Supports conditional downloading and caching for performance optimization.
+- **Corpus Loading**: Handles local directories and NLTK datasets. Supports conditional downloading and caching for performance optimization.
 - **Tokenization**: Offers customizable tokenization, including NLTK's tokenizer, custom regex, and options to remove stopwords and punctuation. Handles text input as strings or lists.
 - **Basic Analysis**: Provides frequency distribution, median token, mean token frequency, specific token queries, rank-based queries, cumulative frequency analysis, and hapax legomena count.
 - **Advanced Analysis**: Implements Zipf's Law, Heaps' Law, and Zipf-Mandelbrot distribution, including parameter estimation and fitting. Provides methods for lexical diversity (Yule's K) and vocabulary richness (Herdan's C).
+- **Entropy Calculation**: Supports character-level entropy calculation, including first-order entropy and higher-order entropy using KenLM models. Also provides redundancy estimation.
 - **Visualization**: Supports plotting for visual representation of Zipf's Law, Heaps' Law, and the Zipf-Mandelbrot distribution, enhancing the understanding of corpus characteristics. Plots are saved to a specified directory.
