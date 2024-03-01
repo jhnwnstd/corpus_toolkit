@@ -623,7 +623,7 @@ class CorpusPlots:
         plt.plot(ranks, normalized_predicted_freqs, label=f'Zipf\'s Law Fit (alpha={alpha:.2f})', color='red', linestyle='-')
         plt.xlabel('Rank')
         plt.ylabel('Normalized Frequency')
-        plt.title(f'Zipf\'s Law Fit (Alpha Only) for {self.corpus_name} Corpus')
+        plt.title(f'Zipf\'s Law Fit for {self.corpus_name} Corpus')
         plt.xscale('log')
         plt.yscale('log')
         plt.legend()
