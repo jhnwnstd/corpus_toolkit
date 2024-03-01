@@ -26,29 +26,27 @@ def load_and_tokenize_corpus(corpus_name):
     logger.info(f"Completed tokenizing {corpus_name}")
     return tokenized_corpus
 
-# Main function to perform analysis on a given corpus including plots generation.
-def perform_analysis(corpus_name, plots_to_generate):
-    # Loading and tokenizing the corpus
-    tokenized_corpus = load_and_tokenize_corpus(corpus_name)
-    # Demonstrating the use of CorpusTools on the tokenized corpus
-    corpus_tools(tokenized_corpus)
+# Function to demonstrate the use of CorpusTools.
+def corpus_tools(tokenized_corpus):
+    logger.info("CorpusTools Analysis:")
+    corpus_analyzer = CorpusTools(tokenized_corpus, shuffle_tokens=True) # Shuffle tokens for smoother Heaps' Law plot fit.
     
-    # Initializing the advanced analyzer with the tokenized corpus
-    advanced_analyzer = AdvancedTools(tokenized_corpus)
-    # Initializing the entropy calculator with the tokenized corpus
-    entropy_calculator = EntropyCalculator(tokenized_corpus)
+    median_token_info = corpus_analyzer.find_median_token()
+    logger.info(f"  Median Token: {median_token_info['token']} (Frequency: {median_token_info['frequency']})")
     
-    # Preparing the directory to save plots
-    plots_dir = Path("plots")     # Technically redundant since this maintained by the toolkit_methods.py
-    plots_dir.mkdir(exist_ok=True)
-    # Initializing the plotter with the advanced analyzer and specified corpus name
-    plotter = CorpusPlots(advanced_analyzer, corpus_name, plots_dir=plots_dir)
+    mean_frequency = corpus_analyzer.mean_token_frequency()
+    logger.info(f"  Mean Token Frequency: {mean_frequency:.2f}")
     
-    # Analyzing the corpus to generate results based on specified plots to generate
-    results = analyze_corpus(advanced_analyzer, entropy_calculator, plotter, plots_to_generate, tokenized_corpus)
+    sample_token = "example"  # Assumes 'example' is present in the corpus.
+    token_query = corpus_analyzer.query_by_token(sample_token)
+    logger.info(f"  Token '{sample_token}' Info: Frequency: {token_query['frequency']}, Rank: {token_query['rank']}")
     
-    # Logging the results of the analysis
-    log_results(corpus_name, results)
+    sample_rank = 1  # Query by the most frequent token.
+    rank_query = corpus_analyzer.query_by_rank(sample_rank)
+    logger.info(f"  Rank {sample_rank} Token: '{rank_query['token']}' (Frequency: {rank_query['frequency']})")
+    
+    vocab_size = len(corpus_analyzer.vocabulary())
+    logger.info(f"  Vocabulary Size: {vocab_size}")
 
 # Analyze the corpus and generate specified plots and calculations.
 def analyze_corpus(advanced_analyzer, entropy_calculator, plotter, plots_to_generate, tokenized_corpus):
@@ -88,37 +86,39 @@ def analyze_corpus(advanced_analyzer, entropy_calculator, plotter, plots_to_gene
         ])
     return results
 
+# Main function to perform analysis on a given corpus including plots generation.
+def perform_analysis(corpus_name, plots_to_generate):
+    # Loading and tokenizing the corpus
+    tokenized_corpus = load_and_tokenize_corpus(corpus_name)
+    # Demonstrating the use of CorpusTools on the tokenized corpus
+    corpus_tools(tokenized_corpus)
+    
+    # Initializing the advanced analyzer with the tokenized corpus
+    advanced_analyzer = AdvancedTools(tokenized_corpus)
+    # Initializing the entropy calculator with the tokenized corpus
+    entropy_calculator = EntropyCalculator(tokenized_corpus)
+    
+    # Preparing the directory to save plots
+    plots_dir = Path("plots")
+    plots_dir.mkdir(exist_ok=True)
+    # Initializing the plotter with the advanced analyzer and specified corpus name
+    plotter = CorpusPlots(advanced_analyzer, corpus_name, plots_dir=plots_dir)
+    
+    # Analyzing the corpus to generate results based on specified plots to generate
+    results = analyze_corpus(advanced_analyzer, entropy_calculator, plotter, plots_to_generate, tokenized_corpus)
+    
+    # Logging the results of the analysis
+    log_results(corpus_name, results)
+
 # Log the summary of the analysis.
 def log_results(corpus_name, results):
     logger.info(f"Analysis Summary for '{corpus_name}':")
     for result in results:
         logger.info(result)
 
-# Function to demonstrate the use of CorpusTools.
-def corpus_tools(tokenized_corpus):
-    logger.info("CorpusTools Analysis:")
-    corpus_analyzer = CorpusTools(tokenized_corpus, shuffle_tokens=True) # Shuffle tokens for smoother Heaps' Law plot fit.
-    
-    median_token_info = corpus_analyzer.find_median_token()
-    logger.info(f"  Median Token: {median_token_info['token']} (Frequency: {median_token_info['frequency']})")
-    
-    mean_frequency = corpus_analyzer.mean_token_frequency()
-    logger.info(f"  Mean Token Frequency: {mean_frequency:.2f}")
-    
-    sample_token = "example"  # Assumes 'example' is present in the corpus.
-    token_query = corpus_analyzer.query_by_token(sample_token)
-    logger.info(f"  Token '{sample_token}' Info: Frequency: {token_query['frequency']}, Rank: {token_query['rank']}")
-    
-    sample_rank = 1  # Query by the most frequent token.
-    rank_query = corpus_analyzer.query_by_rank(sample_rank)
-    logger.info(f"  Rank {sample_rank} Token: '{rank_query['token']}' (Frequency: {rank_query['frequency']})")
-    
-    vocab_size = len(corpus_analyzer.vocabulary())
-    logger.info(f"  Vocabulary Size: {vocab_size}")
+if __name__ == "__main__":
+    corpora = ['brown']
+    plots_to_generate = ["zipf", "heaps", "zipf_mandelbrot", "entropy"]
 
-# Main execution to perform analysis on specified corpora.
-corpora = ['brown']
-plots_to_generate = ["zipf", "heaps", "zipf_mandelbrot", "entropy"]
-
-for corpus in corpora:
-    perform_analysis(corpus, plots_to_generate)
+    for corpus in corpora:
+        perform_analysis(corpus, plots_to_generate)
