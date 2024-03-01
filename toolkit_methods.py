@@ -416,7 +416,7 @@ class AdvancedTools(CorpusTools):
 
         initial_params = [K_linear, beta]
         # Define bounds for the parameters: None for K (allowing it to vary freely) and (0, 1) for beta
-        parameter_bounds = [(None, None), (0.001, 0.999)]  # (min, max) pairs for K and beta, respectively
+        parameter_bounds = [(None, None), (0.01, 0.99)]  # (min, max) pairs for K and beta, respectively
 
         # Refine the estimates of K and beta using nonlinear optimization with bounds
         result = minimize(objective_function, initial_params, method='L-BFGS-B', bounds=parameter_bounds)
