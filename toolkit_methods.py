@@ -631,44 +631,6 @@ class CorpusPlots:
         plt.savefig(self.plots_dir / f'zipfs_alpha_fit_{self.corpus_name}.png')
         plt.close()
 
-    def plot_heaps_law(self):
-        """
-        Plots the relationship between the number of unique words (types) and the total number of words (tokens) in the corpus, illustrating Heaps' Law.
-        Demonstrates corpus vocabulary growth.
-        """
-        # Check if Heaps' Law parameters are already calculated
-        if self.analyzer._heaps_params is None:
-            K, beta = self.analyzer.calculate_heaps_law()
-        else:
-            K, beta = self.analyzer._heaps_params
-        
-        # Check is the calculation was successful
-        if K is None or beta is None:
-            raise ValueError("K or beta calculation failed, cannot plot Heaps' Law.")
-
-        # Prepare data for plotting Heaps' Law
-        total_words = np.arange(1, len(self.analyzer.tokens) + 1)
-        unique_words = []
-        word_set = set()
-
-        # Counting unique words (types) as the corpus grows
-        for token in self.analyzer.tokens:
-            word_set.add(token)
-            unique_words.append(len(word_set))
-
-        # Plotting the empirical data and Heaps' Law fit
-        plt.figure(figsize=(10, 6))
-        plt.plot(total_words, unique_words, label='Empirical Data', color='blue')
-        plt.plot(total_words, K * np.power(total_words, beta), '--', 
-                 label=f"Heap's Law Fit: K={K:.2f}, beta={beta:.2f}", color='red')
-        plt.xlabel('Token Count')
-        plt.ylabel('Type Count')
-        plt.title(f"Heap's Law Analysis for {self.corpus_name} Corpus")
-        plt.legend()
-        plt.grid(True)
-        plt.savefig(self.plots_dir / f'heaps_law_{self.corpus_name}.png')
-        plt.close()
-
     def plot_zipf_mandelbrot_fit(self):
         """
         Plots the fitted parameters of the Zipf-Mandelbrot distribution.
@@ -710,4 +672,42 @@ class CorpusPlots:
         plt.legend()
         plt.grid(True)
         plt.savefig(self.plots_dir / f'zipfs_mandelbrot_fit_{self.corpus_name}.png')
+        plt.close()
+
+    def plot_heaps_law(self):
+        """
+        Plots the relationship between the number of unique words (types) and the total number of words (tokens) in the corpus, illustrating Heaps' Law.
+        Demonstrates corpus vocabulary growth.
+        """
+        # Check if Heaps' Law parameters are already calculated
+        if self.analyzer._heaps_params is None:
+            K, beta = self.analyzer.calculate_heaps_law()
+        else:
+            K, beta = self.analyzer._heaps_params
+        
+        # Check is the calculation was successful
+        if K is None or beta is None:
+            raise ValueError("K or beta calculation failed, cannot plot Heaps' Law.")
+
+        # Prepare data for plotting Heaps' Law
+        total_words = np.arange(1, len(self.analyzer.tokens) + 1)
+        unique_words = []
+        word_set = set()
+
+        # Counting unique words (types) as the corpus grows
+        for token in self.analyzer.tokens:
+            word_set.add(token)
+            unique_words.append(len(word_set))
+
+        # Plotting the empirical data and Heaps' Law fit
+        plt.figure(figsize=(10, 6))
+        plt.plot(total_words, unique_words, label='Empirical Data', color='blue')
+        plt.plot(total_words, K * np.power(total_words, beta), '--', 
+                 label=f"Heap's Law Fit: K={K:.2f}, beta={beta:.2f}", color='red')
+        plt.xlabel('Token Count')
+        plt.ylabel('Type Count')
+        plt.title(f"Heap's Law Analysis for {self.corpus_name} Corpus")
+        plt.legend()
+        plt.grid(True)
+        plt.savefig(self.plots_dir / f'heaps_law_{self.corpus_name}.png')
         plt.close()
