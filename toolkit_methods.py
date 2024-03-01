@@ -618,8 +618,9 @@ class CorpusPlots:
         predicted_freqs = 1 / np.power(ranks, alpha)
         normalized_predicted_freqs = predicted_freqs / np.max(predicted_freqs)
 
+        # Plotting
         plt.figure(figsize=(10, 6))
-        plt.scatter(ranks, normalized_frequencies, color='blue', label='Actual Frequencies', marker='o', linestyle='', s=5)
+        plt.plot(ranks, normalized_frequencies, 'o', label='Actual Frequencies', markersize=5, linestyle='', color='blue')
         plt.plot(ranks, normalized_predicted_freqs, label=f'Zipf\'s Law Fit (alpha={alpha:.2f})', color='red', linestyle='-')
         plt.xlabel('Rank')
         plt.ylabel('Normalized Frequency')
