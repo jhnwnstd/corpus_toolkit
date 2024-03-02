@@ -16,10 +16,6 @@ from nltk.corpus import PlaintextCorpusReader, stopwords
 from nltk.tokenize import word_tokenize
 from scipy.optimize import curve_fit, minimize
 
-# Directory for plots
-plots_dir = Path('plots')
-plots_dir.mkdir(exist_ok=True)
-
 class CorpusLoader:
     """
     Load a corpus from NLTK or a local file/directory, optimized for performance.
@@ -601,7 +597,8 @@ class CorpusPlots:
         """
         self.analyzer = analyzer
         self.corpus_name = corpus_name
-        self.plots_dir = plots_dir
+        self.plots_dir = Path(plots_dir)
+        self.plots_dir.mkdir(exist_ok=True)
 
     def plot_zipfs_law_fit(self):
         """

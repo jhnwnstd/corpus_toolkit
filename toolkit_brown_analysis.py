@@ -121,9 +121,7 @@ def entropy_metrics(entropy_calculator):
 
 def generate_plots(advanced_tools, corpus_name, plots_to_generate):
     logger.info("Generating plots...")
-    plots_dir = Path("plots")
-    plots_dir.mkdir(exist_ok=True)
-    corpus_plots = CorpusPlots(advanced_tools, corpus_name, plots_dir)
+    corpus_plots = CorpusPlots(advanced_tools, corpus_name)
 
     # Generate each requested plot.
     plot_functions = {
