@@ -160,5 +160,9 @@ cython_debug/
 #.idea/
 
 # Repository Specific
-# Ignore the following files in the repository
+# Ignore the following directories in the repository
 /plots
+
+# Ignore the following files in the repository
+*.png 
+*.jpg
