@@ -70,7 +70,7 @@ def basic_analysis(corpus_tools):
 
     # Use of x-legomena to identify bi-legomena (tokens appearing exactly twice)
     bi_legomena_count = len(corpus_tools.x_legomena(2))
-    logger.info(f"  Bi-legomena (types appearing exactly twice): {bi_legomena_count}")
+    logger.info(f"  Dis-legomena (types appearing exactly twice): {bi_legomena_count}")
 
 @lru_cache(maxsize=128)
 def advanced_analysis(advanced_tools):

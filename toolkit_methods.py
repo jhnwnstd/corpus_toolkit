@@ -576,7 +576,7 @@ class EntropyCalculator(CorpusTools):
         num_tokens = len(prepared_text.split()) - self.q_grams + 1
         H3 = -log_prob / num_tokens
         
-        # Cleanup: Now remove the temporary directory after the model has been loaded
+        # Cleanup: remove the temporary directory after the model has been used
         shutil.rmtree(tempdir_path)
         
         return H3
