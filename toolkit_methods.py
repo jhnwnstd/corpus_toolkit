@@ -558,10 +558,10 @@ class EntropyCalculator(CorpusTools):
         model_file_path = tempdir_path / "model.klm"
         arpa_file_path = tempdir_path / "model.arpa"
         
-        # Run lmplz with output redirected to DEVNULL to suppress terminal output
+        # Run lmplz with output redirected to suppress terminal output
         subprocess.run(f"lmplz -o {self.q_grams} --discount_fallback < {text_file_path} > {arpa_file_path}", shell=True, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         
-        # Run build_binary with output redirected to DEVNULL
+        # Run build_binary to convert ARPA file to binary model
         subprocess.run(f"build_binary {arpa_file_path} {model_file_path}", shell=True, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         
         # Return both model file path and temp directory to manage cleanup later
@@ -584,6 +584,12 @@ class EntropyCalculator(CorpusTools):
     def calculate_redundancy(self, H3, H0):
         """Calculate redundancy based on H3 and H0."""
         return (1 - H3 / H0) * 100
+
+    def cleanup_temp_directory(self):
+        """Remove the temporary directory used for KenLM model training."""
+        if hasattr(self, 'tempdir_path') and self.tempdir_path.exists():
+            shutil.rmtree(self.tempdir_path)
+            print("Temporary directory cleaned up.")
 
 class CorpusPlots:
     def __init__(self, analyzer, corpus_name, plots_dir='plots'):
