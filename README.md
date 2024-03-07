@@ -136,7 +136,7 @@ def compile_kenlm(max_order=12):
     Path(kenlm_tar).unlink()
 
 if __name__ == "__main__":
-    compile_kenlm(max_order=12)
+    compile_kenlm(max_order=8)
 ```
 
 ## Example Use (See toolkit_brown_analysis.py for more expansive use demonstration)
