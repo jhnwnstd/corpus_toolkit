@@ -89,7 +89,8 @@ pip install nltk numpy matplotlib scipy
 First, ensure you have the necessary system packages installed. This can be done from a terminal or included in a script that runs shell commands.
 
 ```bash
-sudo apt-get update && sudo apt-get install -y cmake build-essential
+sudo apt-get update
+sudo apt-get install -y cmake build-essential libeigen3-dev libboost-all-dev
 ```
   
 Then, you can use the following Python script to download and compile KenLM:
@@ -97,43 +98,45 @@ Then, you can use the following Python script to download and compile KenLM:
 ```python
 from pathlib import Path
 import subprocess
-import wget
 import os
+import urllib.request
 
-def run_command(command):
-    """Run a shell command."""
-    process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    stdout, stderr = process.communicate()
-    if process.returncode != 0:
-        print(f"Error: {stderr}")
-    else:
-        print(stdout)
+def system_command(command):
+    """Execute a system command with subprocess."""
+    subprocess.run(command, shell=True, check=True)
+
+def download_file(url, local_filename=None):
+    """Download a file from a URL using urllib."""
+    if not local_filename:
+        local_filename = url.split('/')[-1]
+    with urllib.request.urlopen(url) as response, open(local_filename, 'wb') as out_file:
+        out_file.write(response.read())
+    return local_filename
 
 def compile_kenlm(max_order=12):
-    # Download KenLM
+    """Compile KenLM with the specified maximum order."""
     url = "https://kheafield.com/code/kenlm.tar.gz"
-    kenlm_tar = wget.download(url)
-    print(f"Downloaded {kenlm_tar}")
+    kenlm_tar = download_file(url)
 
     # Extract KenLM archive
-    run_command(f"tar -xvzf {kenlm_tar}")
+    system_command(f'tar -xvzf {kenlm_tar}')
 
     # Setup KenLM directory paths using pathlib
-    kenlm_dir = Path.cwd() / 'kenlm'
+    kenlm_dir = Path('kenlm')
     build_dir = kenlm_dir / 'build'
     build_dir.mkdir(parents=True, exist_ok=True)
 
     # Compile KenLM
     os.chdir(build_dir)
-    run_command(f"cmake .. -DKENLM_MAX_ORDER={max_order}")
-    run_command("make -j 4")
+    system_command(f'cmake .. -DKENLM_MAX_ORDER={max_order}')
+    system_command('make -j 4')
     os.chdir('../../')
 
     # Clean up downloaded files
     Path(kenlm_tar).unlink()
 
-# Compile KenLM with specified max order
-compile_kenlm(max_order=8) # Change max_order if needed
+if __name__ == "__main__":
+    compile_kenlm(max_order=12)
 ```
 
 ## Example Use (See toolkit_brown_analysis.py for more expansive use demonstration)
