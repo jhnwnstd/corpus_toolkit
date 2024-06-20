@@ -1,7 +1,21 @@
 import logging
-from pathlib import Path
 from functools import lru_cache
-from toolkit_methods import CorpusLoader, CorpusPlots, EntropyCalculator, Tokenizer, CorpusTools, AdvancedTools
+import nltk
+
+# Import necessary modules from toolkit_methods
+from toolkit_methods import (
+    CorpusLoader,
+    CorpusPlots,
+    EntropyCalculator,
+    Tokenizer,
+    CorpusTools,
+    AdvancedTools
+)
+
+# Download required NLTK data
+nltk.download('brown', quiet=True)
+nltk.download('stopwords', quiet=True)
+nltk.download('punkt', quiet=True)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(message)s')
