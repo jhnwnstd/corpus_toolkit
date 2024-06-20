@@ -97,10 +97,14 @@ class Tokenizer:
         self.custom_regex = None
         # Set to store unwanted tokens (stopwords, punctuation) for removal
         self._unwanted_tokens = set()
-        # Ensure necessary NLTK resources are available
-        self._ensure_nltk_resources()
-        # Load stopwords and punctuation into the set
-        self._load_unwanted_tokens()
+        self._initialized = False
+
+    def _initialize(self):
+        """Initialize the tokenizer by ensuring NLTK resources are available and loading unwanted tokens."""
+        if not self._initialized:
+            self._ensure_nltk_resources()
+            self._load_unwanted_tokens()
+            self._initialized = True
 
     def _ensure_nltk_resources(self):
         """Ensure that NLTK resources are available."""
@@ -132,7 +136,7 @@ class Tokenizer:
         """Remove unwanted tokens (stopwords, punctuation) from a list of tokens."""
         # Filter out tokens present in the unwanted tokens set
         return [token for token in tokens if token not in self._unwanted_tokens and not token.startswith('``')]
-    
+
     def tokenize(self, text, lowercase=False) -> list:
         """Tokenize text into individual words based on the selected method."""
         if isinstance(text, list):
@@ -142,6 +146,8 @@ class Tokenizer:
         if lowercase:
             # Convert text to lowercase if specified
             text = text.lower()
+
+        self._initialize()  # Ensure resources are loaded and unwanted tokens are set
 
         # Perform tokenization based on the selected method
         if self.custom_regex:
@@ -242,14 +248,14 @@ class CorpusTools:
         """
         # Validate rank range
         if rank < 1 or rank > len(self.token_details):
-            raise ValueError("Rank is out of range.")
+            raise ValueError(f"Rank {rank} is out of range. Valid ranks are from 1 to {len(self.token_details)}.")
         
         # Find the token with the specified rank
         token = next((t for t, d in self.token_details.items() if d['rank'] == rank), None)
         if token:
             return {'token': token, 'rank': rank, **self.token_details[token]}
         else:
-            raise ValueError(f"Rank {rank} is out of range.")
+            raise ValueError(f"Token with rank {rank} is not found in the corpus.")
 
     def cumulative_frequency_analysis(self, lower_percent=0, upper_percent=100) -> list:
         """
@@ -286,13 +292,13 @@ class CorpusTools:
         """
         # Validate rank range inputs
         if not (1 <= start_rank <= end_rank <= len(self.token_details)):
-            raise ValueError("Rank range is out of valid bounds.")
+            raise ValueError(f"Rank range is out of valid bounds. Valid ranks are from 1 to {len(self.token_details)}.")
 
         # Extract tokens within the specified rank range
         return [{'token': token, **details}
                 for token, details in self.token_details.items()
                 if start_rank <= details['rank'] <= end_rank]
-    
+
     def x_legomena(self, x) -> set:
         """
         List tokens that occur exactly x times in the corpus.
