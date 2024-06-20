@@ -5,6 +5,7 @@ import subprocess
 import sys
 import tempfile
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import kenlm
@@ -391,53 +392,89 @@ class AdvancedTools(CorpusTools):
         if self._heaps_params is not None:
             return self._heaps_params
 
-        # Use total_token_count from CorpusTools to determine the size of the corpus
-        corpus_size = self.total_token_count
+        corpus_size = self.total_token_count  # Get the total number of tokens in the corpus
+        herdans_c_value = self.herdans_c()  # Get Herdan's C value
 
-        # Herdan's C value is used to inform the sampling strategy, reflecting the complexity of the corpus
-        herdans_c_value = self.herdans_c()
+        # Determine the base sampling rate and adjust the number of samples for better accuracy
+        base_sampling_rate = 0.05 + 0.05 * herdans_c_value
+        if base_sampling_rate > 0.1:
+            base_sampling_rate = 0.1
 
-        # Calculate the sampling rate and number of samples based on Herdan's C value
-        base_sampling_rate = min(0.05 + 0.05 * herdans_c_value, 0.1)
-        adjusted_num_samples = min(1000 + int(500 * herdans_c_value), int(corpus_size * base_sampling_rate))
+        # Determine the adjusted number of samples based on the base sampling rate and corpus characteristics
+        adjusted_num_samples = min(5000 + int(1000 * herdans_c_value), int(corpus_size * base_sampling_rate))
+        
+        # Generate unique sample sizes ranging from 0 to just below the corpus size
+        sample_sizes = np.linspace(0, corpus_size, num=adjusted_num_samples, endpoint=False).astype(int)
+        sample_sizes = np.unique(sample_sizes)
+        # Calculate the distinct word counts for each sample size
+        distinct_word_counts = self._calculate_distinct_word_counts(sample_sizes)
 
-        # Determine the sizes of corpus samples to be analyzed
-        sample_sizes = np.unique(np.linspace(0, corpus_size, num=adjusted_num_samples, endpoint=False).astype(int))
-
-        # Set up data structures for calculating Heaps' Law
-        distinct_word_types_set = set()
-        distinct_word_counts = []
-
-        # Count the number of distinct word types in each sample to model vocabulary growth
-        for size in sample_sizes:
-            sample_tokens = self.tokens[:size]
-            distinct_word_types_set.update(sample_tokens)
-            distinct_word_counts.append(len(distinct_word_types_set))
-
-        # Apply linear regression to log-transformed sample sizes and distinct word counts for initial parameter estimation
-        log_sample_sizes = np.log(sample_sizes[1:])  # Log-transform to linearize the growth relationship
+        # Perform linear regression on the log-transformed sample sizes and distinct word counts
+        log_sample_sizes = np.log(sample_sizes[1:])
         log_distinct_word_counts = np.log(distinct_word_counts[1:])
         beta, logK = np.polyfit(log_sample_sizes, log_distinct_word_counts, 1)
         K_linear = np.exp(logK)  # Convert back from log scale to obtain the initial estimate of K
 
-        # Refine the estimates of K and beta using nonlinear optimization
-        def objective_function(params):
-            K, beta = params
-            # Objective: Minimize the sum of squared differences between observed and predicted counts of distinct word types
-            return np.sum((K * sample_sizes**beta - distinct_word_counts)**2)
+        initial_params = [K_linear, beta]  # Set initial parameters for optimization
+        parameter_bounds = [(0, None), (0.01, 0.99)]  # Set bounds for the parameters
 
-        initial_params = [K_linear, beta]
-        # Define bounds for the parameters: None for K (allowing it to vary freely) and (0, 1) for beta
-        parameter_bounds = [(None, None), (0.01, 0.99)]  # (min, max) pairs for K and beta, respectively
+        # Optimize the parameters using nonlinear optimization
+        result = minimize(self._objective_function, initial_params, args=(sample_sizes, distinct_word_counts), method='L-BFGS-B', bounds=parameter_bounds)
+        K, beta = result.x if result.success else (K_linear, beta)  # Use the results from linear regression if optimization does not succeed
 
-        # Refine the estimates of K and beta using nonlinear optimization with bounds
-        result = minimize(objective_function, initial_params, method='L-BFGS-B', bounds=parameter_bounds)
-
-        # Use the results from linear regression if the optimization does not succeed
-        K, beta = result.x if result.success else (K_linear, beta)
+        # Refine the parameter estimates using bootstrap sampling
+        K, beta = self._bootstrap_sampling(K, beta, sample_sizes, distinct_word_counts)
 
         # Cache the optimized parameters for future reference
         self._heaps_params = (K, beta)
+        return K, beta
+
+    def _calculate_distinct_word_counts(self, sample_sizes):
+        # Initialize a set to store distinct word types and a list to store the counts
+        distinct_word_types_set = set()
+        distinct_word_counts = []
+
+        # Function to count distinct words in a sample
+        def count_distinct_words(size):
+            sample_tokens = self.tokens[:size]
+            distinct_word_types_set.update(sample_tokens)
+            return len(distinct_word_types_set)
+
+        # Use ThreadPoolExecutor to parallelize the counting of distinct words for different sample sizes
+        with ThreadPoolExecutor() as executor:
+            distinct_word_counts = list(executor.map(count_distinct_words, sample_sizes))
+
+        return distinct_word_counts
+
+    def _objective_function(self, params, sample_sizes, distinct_word_counts):
+        # Define the objective function for optimization
+        K, beta = params
+        return np.sum((K * sample_sizes**beta - distinct_word_counts)**2)
+
+    def _bootstrap_sampling(self, K, beta, sample_sizes, distinct_word_counts, n_iterations=1000):
+        bootstrap_estimates = []
+
+        # Function to perform bootstrap sampling and optimization
+        def sample_and_optimize(seed):
+            np.random.seed(seed)
+            indices = np.random.choice(len(sample_sizes), len(sample_sizes), replace=True)
+            sampled_sizes = sample_sizes[indices]
+            sampled_counts = np.array(distinct_word_counts)[indices]
+
+            def objective(params):
+                K_b, beta_b = params
+                return np.sum((K_b * sampled_sizes**beta_b - sampled_counts)**2)
+
+            result = minimize(objective, [K, beta], method='L-BFGS-B', bounds=[(0, None), (0.01, 0.99)])
+            return result.x if result.success else (K, beta)
+
+        # Use ThreadPoolExecutor to parallelize the bootstrap sampling
+        with ThreadPoolExecutor() as executor:
+            seeds = np.random.randint(0, 10000, n_iterations)
+            bootstrap_estimates = list(executor.map(sample_and_optimize, seeds))
+
+        # Calculate the mean of the bootstrap estimates to obtain the final parameter values
+        K, beta = np.mean(bootstrap_estimates, axis=0)
         return K, beta
     
     def estimate_vocabulary_size(self, total_tokens) -> int:
