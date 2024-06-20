@@ -33,24 +33,33 @@ class CorpusLoader:
     def _download_corpus(self):
         """Download the corpus from NLTK."""
         # Append custom download directory to NLTK's data path if provided
-        if self.custom_download_dir:
+        if self.custom_download_dir and self.custom_download_dir not in nltk.data.path:
             nltk.data.path.append(self.custom_download_dir)
         # Download corpus using NLTK's download utility
         nltk.download(self.corpus_source, download_dir=self.custom_download_dir, quiet=True)
 
+    def _load_corpus_from_path(self, path):
+        """Load the corpus from a local file or directory."""
+        # Use PlaintextCorpusReader to read tokens from the local path
+        corpus_reader = PlaintextCorpusReader(str(path), '.*')
+        # Return all tokens from the corpus
+        return [token for fileid in corpus_reader.fileids() for token in corpus_reader.words(fileid)]
+
+    def _load_corpus_from_nltk(self):
+        """Load the corpus from NLTK."""
+        # Access corpus from NLTK using the corpus name
+        corpus_reader = getattr(nltk.corpus, self.corpus_source)
+        # Return all tokens from the corpus
+        return [token for fileid in corpus_reader.fileids() for token in corpus_reader.words(fileid)]
+
     def _load_corpus(self):
         """Load the corpus into memory."""
-        corpus_source_path = Path(self.corpus_source)
-        
-        # Handle loading from a local file or directory using pathlib
-        if corpus_source_path.is_file() or corpus_source_path.is_dir():
-            corpus_reader = PlaintextCorpusReader(str(corpus_source_path), '.*')
+        # Determine if the source is a local path or an NLTK corpus name
+        path = Path(self.corpus_source)
+        if path.is_file() or path.is_dir():
+            return self._load_corpus_from_path(path)
         else:
-            # Access corpus from NLTK if it's a named dataset
-            corpus_reader = getattr(nltk.corpus, self.corpus_source)
-        
-        # Read all tokens from the corpus
-        return [token for fileid in corpus_reader.fileids() for token in corpus_reader.words(fileid)]
+            return self._load_corpus_from_nltk()
 
     def load_corpus(self):
         """Get the corpus, either from cache or by loading it."""
@@ -74,6 +83,7 @@ class CorpusLoader:
             return True
         except LookupError:
             return False
+        
 class Tokenizer:
     """
     Tokenize text into individual words.
