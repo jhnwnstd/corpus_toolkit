@@ -65,8 +65,11 @@ def basic_analysis(corpus_tools):
     
     # Query Specific Token
     example_token = 'example'
-    example_token_info = corpus_tools.query_by_token(example_token)
-    logger.info(f"  Info for token '{example_token}': {example_token_info}")
+    try:
+        example_token_info = corpus_tools.query_by_token(example_token)
+        logger.info(f"  Info for token '{example_token}': {example_token_info}")
+    except ValueError as e:
+        logger.warning(f"  {str(e)}")
     
     # Query by Rank (e.g., most frequent token)
     rank_1_token_info = corpus_tools.query_by_rank(1)
@@ -119,19 +122,19 @@ def entropy_metrics(entropy_calculator):
 
     # Zeroth-Order Entropy: Measure of the diversity of individual characters/symbols.
     H0 = entropy_calculator.calculate_H0()
-    logger.info(f"  H0 (Zeroth-Order Entropy): {H0:.2f} bits - Represents the diversity of the alphabet used in the corpus.")
+    logger.info(f"  H0: {H0:.2f} bits - Equal probability for every letter.")
 
     # First-Order Entropy: Accounts for the frequency distribution of characters/symbols.
     H1 = entropy_calculator.calculate_H1()
-    logger.info(f"  H1 (First-Order Entropy): {H1:.2f} bits - Considers the frequency of each character, giving insight into character predictability.")
+    logger.info(f"  H1: {H1:.2f} bits - Unigram frequency of each letter.")
 
     # Higher-Order Entropy (KenLM): Utilizes a language model to consider context beyond individual characters.
     H3_kenlm = entropy_calculator.calculate_H3_kenlm()
-    logger.info(f"  H3 (KenLM Model Entropy): {H3_kenlm:.2f} bits - Reflects the predictability of text given context, using a {entropy_calculator.q_grams}-gram model.")
+    logger.info(f"  H3: {H3_kenlm:.2f} bits - {entropy_calculator.q_grams}-gram model context predictability.")
 
     # Redundancy: Illustrates the proportion of information that is predictable or redundant.
     redundancy = entropy_calculator.calculate_redundancy(H3_kenlm, H0)
-    logger.info(f"  Redundancy: {redundancy:.2f}% - Indicates the percentage of text predictability, highlighting information density and efficiency.")
+    logger.info(f"  Redundancy: {redundancy:.2f}% - Letter predictability.")
 
 def generate_plots(advanced_tools, corpus_name, plots_to_generate):
     logger.info("Generating plots...")

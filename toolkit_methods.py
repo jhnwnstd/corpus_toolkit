@@ -16,7 +16,7 @@ import numpy as np
 import regex as reg
 from nltk.corpus import PlaintextCorpusReader, stopwords
 from nltk.tokenize import word_tokenize
-from scipy.optimize import curve_fit, minimize
+from scipy.optimize import curve_fit, differential_evolution, minimize
 from numba import njit
 
 class CorpusLoader:
@@ -511,10 +511,9 @@ class AdvancedTools(CorpusTools):
 
     def calculate_zipf_alpha(self):
         """
-        Calculate the alpha parameter for Zipf's Law using curve fitting with optimization.
+        Calculate the alpha parameter for Zipf's Law using an improved optimization approach.
         """
         if self._zipf_alpha is not None:
-            # Use cached value if available
             return self._zipf_alpha
 
         # Define the Zipf function for curve fitting
@@ -525,30 +524,28 @@ class AdvancedTools(CorpusTools):
         ranks = np.arange(1, len(self.frequency) + 1)
         frequencies = np.array([freq for _, freq in self.frequency.most_common()])
 
-        # Set up grid search for initial alpha guesses
-        alpha_guesses = np.linspace(0.5, 1.25, num=10000)  # Adjust the range and number of points as needed
-        best_alpha = None
-        min_error = float('inf')
+        # Define the error function for optimization
+        def error_function(params):
+            alpha, C = params
+            predicted = zipf_func(ranks, alpha, C)
+            return np.sum((frequencies - predicted) ** 2)  # Using sum of squared errors
 
-        # Loop over alpha guesses to find the best starting point
-        for alpha_guess in alpha_guesses:
-            try:
-                popt, _ = curve_fit(zipf_func, ranks, frequencies, p0=[alpha_guess, np.max(frequencies)], maxfev=10000)
-                current_error = np.sum(np.abs(frequencies - zipf_func(ranks, *popt)))
-                if current_error < min_error:
-                    min_error = current_error
-                    best_alpha = popt[0]
-            except RuntimeError:
-                # Handle cases where curve_fit fails to converge for a given alpha guess
-                continue
+        # Use differential evolution for a robust initial guess
+        bounds = [(0.5, 1.5), (np.min(frequencies), np.max(frequencies))]
+        result = differential_evolution(error_function, bounds)
+        if result.success:
+            initial_alpha, initial_C = result.x
+        else:
+            raise RuntimeError("Differential evolution failed to converge")
 
-        if best_alpha is None:
-            raise RuntimeError("Optimization failed to converge")
+        # Refine the estimate using curve fitting
+        try:
+            popt, _ = curve_fit(zipf_func, ranks, frequencies, p0=[initial_alpha, initial_C], maxfev=10000)
+            self._zipf_alpha = popt[0]
+        except RuntimeError:
+            raise RuntimeError("Curve fitting failed to converge")
 
-        # Cache the calculated alpha value
-        self._zipf_alpha = best_alpha
-
-        return best_alpha
+        return self._zipf_alpha
 
     def calculate_zipf_mandelbrot(self, initial_params=None, verbose=False):
         """
@@ -573,26 +570,28 @@ class AdvancedTools(CorpusTools):
             normalized_predicted = predicted / np.max(predicted)
             return np.sum((normalized_freqs - normalized_predicted) ** 2)
 
-        # Adaptive initial parameters if not provided
-        if initial_params is None:
-            initial_params = [2.7, 1.0]  # Empirical initial values
-
-        # Adjusting bounds based on empirical data
+        # Use differential evolution for a robust initial guess
         bounds = [(1.0, 10.0), (0.1, 3.0)]
-
-        # Optimization to minimize the objective function
-        result = minimize(objective_function, initial_params, method='Nelder-Mead', bounds=bounds, options={'disp': verbose})
-
+        result = differential_evolution(objective_function, bounds)
         if result.success:
-            q, s = result.x
-            if verbose:
-                print(f"Optimization successful. Fitted parameters: q = {q}, s = {s}")
-            self._zipf_mandelbrot_params = q, s
-            return q, s
+            initial_q, initial_s = result.x
         else:
-            if verbose:
-                print("Optimization did not converge.")
-            raise ValueError("Optimization did not converge")
+            raise RuntimeError("Differential evolution failed to converge")
+
+        # Refine the estimate using local optimization
+        try:
+            refined_result = minimize(objective_function, [initial_q, initial_s], method='L-BFGS-B', bounds=bounds, options={'disp': verbose})
+            if refined_result.success:
+                q, s = refined_result.x
+                if verbose:
+                    print(f"Optimization successful. Fitted parameters: q = {q}, s = {s}")
+                self._zipf_mandelbrot_params = q, s
+            else:
+                raise RuntimeError("Local optimization failed to converge")
+        except RuntimeError:
+            raise RuntimeError("Curve fitting failed to converge")
+
+        return self._zipf_mandelbrot_params
 
 class EntropyCalculator(CorpusTools):
     def __init__(self, tokens, q_grams=8):
@@ -674,19 +673,20 @@ class CorpusPlots:
         """
         Plot the rank-frequency distribution using Zipf's Law focusing on alpha.
         """
-        # Check if alpha is already calculated
-        if self.analyzer._zipf_alpha is None:
+        # Calculate or retrieve the alpha parameter
+        alpha = self.analyzer._zipf_alpha
+        if alpha is None:
             alpha = self.analyzer.calculate_zipf_alpha()
-        else:
-            alpha = self.analyzer._zipf_alpha
-        
-        # Check if the calculation was successful
+
+        # Validate alpha calculation
         if alpha is None:
             raise ValueError("Alpha calculation failed, cannot plot Zipf's Law fit.")
 
+        # Extract ranks and frequencies
         ranks = np.arange(1, len(self.analyzer.frequency) + 1)
         frequencies = np.array([freq for _, freq in self.analyzer.frequency.most_common()])
 
+        # Normalize frequencies for better visualization
         normalized_frequencies = frequencies / np.max(frequencies)
         predicted_freqs = 1 / np.power(ranks, alpha)
         normalized_predicted_freqs = predicted_freqs / np.max(predicted_freqs)
@@ -710,38 +710,39 @@ class CorpusPlots:
         Plots the fitted parameters of the Zipf-Mandelbrot distribution.
         This distribution is a generalization of Zipf's Law, adding parameters to account for corpus-specific characteristics.
         """
-        # Check if Zipf-Mandelbrot parameters are already calculated
-        if self.analyzer._zipf_mandelbrot_params is None:
-            q, s = self.analyzer.calculate_zipf_mandelbrot()
-        else:
-            q, s = self.analyzer._zipf_mandelbrot_params
+        # Calculate or retrieve Zipf-Mandelbrot parameters
+        params = self.analyzer._zipf_mandelbrot_params
+        if params is None:
+            params = self.analyzer.calculate_zipf_mandelbrot()
 
-        # Check if the calculation was successful
-        if q is None or s is None:
+        # Validate parameter calculation
+        if params is None:
             raise ValueError("q or s calculation failed, cannot plot Zipf-Mandelbrot distribution.")
+        q, s = params
         
+        # Extract ranks and frequencies
         ranks = np.array([details['rank'] for details in self.analyzer.token_details.values()])
         frequencies = np.array([details['frequency'] for details in self.analyzer.token_details.values()])
 
-        # Defining the Zipf-Mandelbrot function
+        # Define Zipf-Mandelbrot function
         def zipf_mandelbrot(k, q, s):
-            return (1 / ((k + q) ** s))
+            return 1 / np.power(k + q, s)
 
-        # Computing predicted frequencies using the Zipf-Mandelbrot parameters
-        predicted_freqs = np.array([zipf_mandelbrot(rank, q, s) for rank in ranks])
+        # Calculate predicted frequencies
+        predicted_freqs = zipf_mandelbrot(ranks, q, s)
 
-        # Normalizing for plotting
+        # Normalize for plotting
         normalized_freqs = frequencies / np.max(frequencies)
         normalized_predicted_freqs = predicted_freqs / np.max(predicted_freqs)
 
-        # Plotting the empirical data against the fitted distribution
+        # Plotting
         plt.figure(figsize=(10, 6))
         plt.plot(ranks, normalized_freqs, label='Actual Frequencies', marker='o', linestyle='', markersize=5)
         plt.plot(ranks, normalized_predicted_freqs, label=f'Zipf-Mandelbrot Fit (q={q:.2f}, s={s:.2f})', linestyle='-', color='red')
         plt.xlabel('Rank')
         plt.ylabel('Normalized Frequency')
         plt.title(f'Zipf-Mandelbrot Fit for {self.corpus_name} Corpus')
-        plt.xscale('log')  # Logarithmic scale for better visualization
+        plt.xscale('log')
         plt.yscale('log')
         plt.legend()
         plt.grid(True)
@@ -753,15 +754,15 @@ class CorpusPlots:
         Plots the relationship between the number of unique words (types) and the total number of words (tokens) in the corpus, illustrating Heaps' Law.
         Demonstrates corpus vocabulary growth.
         """
-        # Check if Heaps' Law parameters are already calculated
-        if self.analyzer._heaps_params is None:
-            K, beta = self.analyzer.calculate_heaps_law()
-        else:
-            K, beta = self.analyzer._heaps_params
-        
-        # Check is the calculation was successful
-        if K is None or beta is None:
-            raise ValueError("K or beta calculation failed, cannot plot Heaps' Law.")
+        # Calculate or retrieve Heaps' Law parameters
+        params = self.analyzer._heaps_params
+        if params is None:
+            params = self.analyzer.calculate_heaps_law()
+
+        # Validate parameter calculation
+        if params is None:
+            raise ValueError("Heaps' Law parameters calculation failed, cannot plot Heaps' Law.")
+        K, beta = params
 
         # Prepare data for plotting Heaps' Law
         total_words = np.arange(1, len(self.analyzer.tokens) + 1)
@@ -776,11 +777,10 @@ class CorpusPlots:
         # Plotting the empirical data and Heaps' Law fit
         plt.figure(figsize=(10, 6))
         plt.plot(total_words, unique_words, label='Empirical Data', color='blue')
-        plt.plot(total_words, K * np.power(total_words, beta), '--', 
-                 label=f"Heap's Law Fit: K={K:.2f}, beta={beta:.2f}", color='red')
+        plt.plot(total_words, K * np.power(total_words, beta), '--', label=f"Heaps' Law Fit: K={K:.2f}, beta={beta:.2f}", color='red')
         plt.xlabel('Token Count')
         plt.ylabel('Type Count')
-        plt.title(f"Heap's Law Analysis for {self.corpus_name} Corpus")
+        plt.title(f"Heaps' Law Analysis for {self.corpus_name} Corpus")
         plt.legend()
         plt.grid(True)
         plt.savefig(self.plots_dir / f'heaps_law_{self.corpus_name}.png')
