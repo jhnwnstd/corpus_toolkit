@@ -31,7 +31,7 @@ def load_and_tokenize_corpus(corpus_name):
     logger.info(f"Completed tokenizing {corpus_name}")
     return tokenized_corpus
 
-def analyze_corpus(corpus_name, tokenized_corpus, shuffle=False):
+def analyze_corpus(tokenized_corpus, shuffle=False):
     corpus_tools = CorpusTools(tokenized_corpus, shuffle_tokens=shuffle)
     basic_analysis(corpus_tools)
 
@@ -163,5 +163,5 @@ def generate_plots(advanced_tools, corpus_name, plots_to_generate):
 
 if __name__ == "__main__":
     tokenized_corpus = load_and_tokenize_corpus(corpus_name)
-    advanced_tools = analyze_corpus(corpus_name, tokenized_corpus, shuffle=True)
+    advanced_tools = analyze_corpus(tokenized_corpus, shuffle=True)
     generate_plots(advanced_tools, corpus_name, ["heaps", "zipf", "zipf_mandelbrot"])
