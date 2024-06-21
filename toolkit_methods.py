@@ -601,6 +601,7 @@ class EntropyCalculator(CorpusTools):
         self.q_grams = q_grams
 
     def calculate_H0(self):
+        """Calculate the zeroth-order entropy (H0)."""
         # Assuming alphabet consists of only letters, case ignored
         alphabet = set(''.join(self.tokens).replace(' ', ''))
         alphabet_size = len(alphabet)

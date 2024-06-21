@@ -51,12 +51,27 @@ Python toolkit for textual analysis and visualization. Features include lexical 
 - **Inheritance**: Inherits from `CorpusTools`.
 
 ### EntropyCalculator
-- **Purpose**: Calculates entropy for the letters in a text corpus. Designed around character-level entropy, it provides insights into the predictability and structure of the text.
+- **Purpose**: Calculates various entropy measures for the letters in a text corpus. Designed around character-level entropy, it provides insights into the predictability and structure of the text at different levels of complexity.
 - **Key Methods**:
-  - `calculate_H0()`: Computes the maximum entropy for the corpus, assuming a uniform distribution of characters.
-  - `calculate_H1()`: Calculates first-order entropy by considering the predictability of characters given their uni-gram frequencies.
-  - `calculate_H3_kenlm()`: Utilizes KenLM models to estimate higher-order entropy, offering deeper insights into textual structure and predictability.
-  - `calculate_redundancy()`: Assesses the redundancy in the text by comparing the calculated entropy with the theoretical maximum entropy.
+  - `calculate_H0()`: Computes the zeroth-order entropy (maximum entropy) for the corpus.
+    - Calculation: H0 = log2(alphabet size)
+    - Interpretation: Assumes a uniform distribution of characters, representing the theoretical maximum entropy.
+  - `calculate_H1()`: Calculates first-order entropy based on individual character frequencies.
+    - Calculation: H1 = -Σ(p(i) * log2(p(i))), where p(i) is the probability of character i
+    - Interpretation: Considers the predictability of characters based on their frequency in the text.
+  - `calculate_H2()`: Calculates second-order (Rényi) entropy, also known as collision entropy.
+    - Calculation: H2 = -log2(Σ(p(i)^2))
+    - Interpretation: Considers the probability of encountering the same character twice when sampling randomly. Less sensitive to rare events compared to H1.
+  - `calculate_H3_kenlm()`: Utilizes KenLM models to estimate higher-order entropy.
+    - Calculation: Based on n-gram language models (where n is specified by q_grams)
+    - Interpretation: Captures linguistic patterns and context, providing deeper insights into text structure and predictability.
+  - `calculate_redundancy()`: Assesses the redundancy in the text.
+    - Calculation: Redundancy = (1 - H3/H0) * 100%
+    - Interpretation: Measures the proportion of the text that is predictable based on linguistic structure.
+- **Entropy Progression**:
+  - Typically, H0 > H1 > H2 > H3
+  - Each successive measure captures more linguistic structure and context
+  - Lower values indicate more predictability and structure in the text
 - **Inheritance**: Inherits from `CorpusTools`, leveraging its functionalities for preprocessing and token management to facilitate entropy calculations.
 
 ### CorpusPlots
