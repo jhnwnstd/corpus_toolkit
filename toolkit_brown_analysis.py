@@ -120,21 +120,25 @@ def advanced_analysis(advanced_tools):
 def entropy_metrics(entropy_calculator):
     logger.info("Entropy Metrics Analysis:")
 
-    # Zeroth-Order Entropy: Measure of the diversity of individual characters/symbols.
+    # Zeroth-Order Entropy
     H0 = entropy_calculator.calculate_H0()
-    logger.info(f"  H0: {H0:.2f} bits - Equal probability for every letter.")
+    logger.info(f"  H0: {H0:.2f} bits - Maximum entropy, assuming uniform distribution.")
 
-    # First-Order Entropy: Accounts for the frequency distribution of characters/symbols.
+    # First-Order Entropy
     H1 = entropy_calculator.calculate_H1()
-    logger.info(f"  H1: {H1:.2f} bits - Unigram frequency of each letter.")
+    logger.info(f"  H1: {H1:.2f} bits - Based on individual character frequencies.")
 
-    # Higher-Order Entropy (KenLM): Utilizes a language model to consider context beyond individual characters.
+    # Second-Order Rényi Entropy
+    H2 = entropy_calculator.calculate_H2()
+    logger.info(f"  H2: {H2:.2f} bits - Collision entropy, considers character pair probabilities.")
+
+    # Higher-Order Entropy (KenLM)
     H3_kenlm = entropy_calculator.calculate_H3_kenlm()
-    logger.info(f"  H3: {H3_kenlm:.2f} bits - {entropy_calculator.q_grams}-gram model context predictability.")
+    logger.info(f"  H3: {H3_kenlm:.2f} bits - {entropy_calculator.q_grams}-gram model, captures linguistic patterns.")
 
-    # Redundancy: Illustrates the proportion of information that is predictable or redundant.
+    # Redundancy
     redundancy = entropy_calculator.calculate_redundancy(H3_kenlm, H0)
-    logger.info(f"  Redundancy: {redundancy:.2f}% - Letter predictability.")
+    logger.info(f"  Redundancy: {redundancy:.2f}% - Predictability based on linguistic structure.")
 
 def generate_plots(advanced_tools, corpus_name, plots_to_generate):
     logger.info("Generating plots...")

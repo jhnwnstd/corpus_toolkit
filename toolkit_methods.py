@@ -612,6 +612,26 @@ class EntropyCalculator(CorpusTools):
         total_letters = sum(letter_freq.values())
         return -sum((freq / total_letters) * math.log2(freq / total_letters) for freq in letter_freq.values())
 
+    def calculate_H2(self):
+        """
+        Calculate the Rényi entropy of order 2 (H2).
+        This is also known as collision entropy.
+        """
+        # Join all tokens and remove spaces to consider character distribution
+        text = ''.join(self.tokens).replace(' ', '')
+        
+        # Count character frequencies
+        char_freq = Counter(text)
+        total_chars = len(text)
+        
+        # Calculate probabilities
+        probabilities = np.array([count / total_chars for count in char_freq.values()])
+        
+        # Calculate H2
+        H2 = -np.log2(np.sum(probabilities**2))
+        
+        return H2
+
     def train_kenlm_model(self, text):
         """Train a KenLM model with the given text and return the model path, without immediate cleanup."""
         tempdir_path = Path(tempfile.mkdtemp())  # Create temporary directory
