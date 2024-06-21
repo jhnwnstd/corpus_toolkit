@@ -1,0 +1,7 @@
+https://github.com/kpu/kenlm/archive/master.zip # KenLM
+matplotlib==3.4.2  # Use the latest version compatible with your setup
+nltk==3.6.2  # Use the latest version compatible with your setup
+numpy==1.21.0  # Use the latest version compatible with your setup
+regex==2021.4.4  # Use the latest version compatible with your setup
+scipy==1.7.0  # Use the latest version compatible with your setup
+numba==0.53.1  # Use the latest version compatible with your setup
