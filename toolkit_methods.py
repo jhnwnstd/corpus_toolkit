@@ -4,7 +4,7 @@ import string
 import subprocess
 import sys
 import tempfile
-from collections import Counter
+from collections import Counter, defaultdict
 import multiprocessing
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -434,24 +434,43 @@ class AdvancedTools(CorpusTools):
 
     def _calculate_distinct_word_counts(self, sample_sizes):
         """
-        Calculate distinct word counts for a range of sample sizes using optimized methods.
+        Calculate distinct word counts for a range of sample sizes using highly optimized methods.
         """
-        tokens = self.tokens  # List of tokens in the corpus
-        distinct_word_types_set = set()  # Set to store distinct word types
-        distinct_word_counts = np.zeros(len(sample_sizes), dtype=int)  # Array to store distinct word counts
-
-        current_index = 0  # Current index in the tokens list
-        next_sample_idx = 0  # Index of the next sample size to process
-
-        # Iterate through tokens and update distinct word counts at the specified sample sizes
-        for idx, token in enumerate(tokens):
-            distinct_word_types_set.add(token)
-            while next_sample_idx < len(sample_sizes) and idx + 1 >= sample_sizes[next_sample_idx]:
-                distinct_word_counts[next_sample_idx] = len(distinct_word_types_set)
-                next_sample_idx += 1
-
+        # Get the largest sample size we need to process
+        max_sample_size = sample_sizes[-1]
+        
+        # Use a defaultdict to assign a unique index to each new word
+        # This is more efficient than using a set for checking uniqueness
+        word_to_index = defaultdict(lambda: len(word_to_index))
+        
+        # Pre-allocate an array to store the distinct word counts for each sample size
+        # This is more efficient than appending to a list
+        distinct_word_counts = np.zeros(len(sample_sizes), dtype=int)
+        
+        # Initialize counters
+        sample_index = 0  # Tracks which sample size we're currently processing
+        unique_count = 0  # Keeps track of the number of unique words seen so far
+        
+        # Iterate through tokens, but only up to the maximum sample size we need
+        for i, token in enumerate(self.tokens[:max_sample_size]):
+            # If this token's index equals the current unique count,
+            # it means this is a new unique word
+            if word_to_index[token] == unique_count:
+                unique_count += 1
+            
+            # Check if we've reached the next sample size(s) in our list
+            while sample_index < len(sample_sizes) and i + 1 >= sample_sizes[sample_index]:
+                # Record the current unique word count for this sample size
+                distinct_word_counts[sample_index] = unique_count
+                # Move to the next sample size
+                sample_index += 1
+            
+            # If we've processed all sample sizes, we can stop early
+            if sample_index == len(sample_sizes):
+                break
+        
         return distinct_word_counts
-
+    
     @staticmethod
     @njit
     def _objective_function(params, sample_sizes, distinct_word_counts):
@@ -472,23 +491,23 @@ class AdvancedTools(CorpusTools):
             """
             Perform bootstrap sampling and optimization.
             """
-            np.random.seed(seed)
+            np.random.seed(seed) # Set seed for reproducibility
             indices = np.random.choice(len(sample_sizes), len(sample_sizes), replace=True)
             sampled_sizes = sample_sizes[indices]
             sampled_counts = distinct_word_counts[indices]
 
             def objective(params):
                 K_b, beta_b = params
-                return np.sum((K_b * sampled_sizes**beta_b - sampled_counts)**2)
+                return np.sum((K_b * sampled_sizes**beta_b - sampled_counts)**2) # Using sum of squared errors
 
             result = minimize(objective, [K, beta], method='L-BFGS-B', bounds=[(0, None), (0.01, 0.99)])
             return result.x if result.success else (K, beta)
 
         # Use ThreadPoolExecutor to parallelize the bootstrap sampling
-        max_workers = min(multiprocessing.cpu_count(), 32)
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            seeds = np.random.randint(0, 10000, n_iterations)
-            bootstrap_estimates = list(executor.map(sample_and_optimize, seeds))
+        max_workers = min(multiprocessing.cpu_count(), 32) # Limit the number of workers
+        with ThreadPoolExecutor(max_workers=max_workers) as executor: # Use ThreadPoolExecutor for parallel processing
+            seeds = np.random.randint(0, 10000, n_iterations) # Generate random seeds
+            bootstrap_estimates = list(executor.map(sample_and_optimize, seeds)) # Perform bootstrap sampling
 
         # Calculate the mean of the bootstrap estimates to obtain the final parameter values
         K, beta = np.mean(bootstrap_estimates, axis=0)
