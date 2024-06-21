@@ -5,6 +5,7 @@ import subprocess
 import sys
 import tempfile
 from collections import Counter
+import multiprocessing
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -16,6 +17,7 @@ import regex as reg
 from nltk.corpus import PlaintextCorpusReader, stopwords
 from nltk.tokenize import word_tokenize
 from scipy.optimize import curve_fit, minimize
+from numba import njit
 
 class CorpusLoader:
     """
@@ -406,6 +408,7 @@ class AdvancedTools(CorpusTools):
         # Generate unique sample sizes ranging from 0 to just below the corpus size
         sample_sizes = np.linspace(0, corpus_size, num=adjusted_num_samples, endpoint=False).astype(int)
         sample_sizes = np.unique(sample_sizes)
+
         # Calculate the distinct word counts for each sample size
         distinct_word_counts = self._calculate_distinct_word_counts(sample_sizes)
 
@@ -430,36 +433,49 @@ class AdvancedTools(CorpusTools):
         return K, beta
 
     def _calculate_distinct_word_counts(self, sample_sizes):
-        # Initialize a set to store distinct word types and a list to store the counts
-        distinct_word_types_set = set()
-        distinct_word_counts = []
+        """
+        Calculate distinct word counts for a range of sample sizes using optimized methods.
+        """
+        tokens = self.tokens  # List of tokens in the corpus
+        distinct_word_types_set = set()  # Set to store distinct word types
+        distinct_word_counts = np.zeros(len(sample_sizes), dtype=int)  # Array to store distinct word counts
 
-        # Function to count distinct words in a sample
-        def count_distinct_words(size):
-            sample_tokens = self.tokens[:size]
-            distinct_word_types_set.update(sample_tokens)
-            return len(distinct_word_types_set)
+        current_index = 0  # Current index in the tokens list
+        next_sample_idx = 0  # Index of the next sample size to process
 
-        # Use ThreadPoolExecutor to parallelize the counting of distinct words for different sample sizes
-        with ThreadPoolExecutor() as executor:
-            distinct_word_counts = list(executor.map(count_distinct_words, sample_sizes))
+        # Iterate through tokens and update distinct word counts at the specified sample sizes
+        for idx, token in enumerate(tokens):
+            distinct_word_types_set.add(token)
+            while next_sample_idx < len(sample_sizes) and idx + 1 >= sample_sizes[next_sample_idx]:
+                distinct_word_counts[next_sample_idx] = len(distinct_word_types_set)
+                next_sample_idx += 1
 
         return distinct_word_counts
 
-    def _objective_function(self, params, sample_sizes, distinct_word_counts):
-        # Define the objective function for optimization
-        K, beta = params
-        return np.sum((K * sample_sizes**beta - distinct_word_counts)**2)
+    @staticmethod
+    @njit
+    def _objective_function(params, sample_sizes, distinct_word_counts):
+        """
+        Define the objective function for optimization based on Heaps' Law.
+        """
+        K, beta = params  # Parameters for Heaps' Law
+        predicted = K * np.power(sample_sizes, beta)  # Predicted distinct word counts
+        return np.sum(np.square(predicted - distinct_word_counts))  # Sum of squared errors
 
-    def _bootstrap_sampling(self, K, beta, sample_sizes, distinct_word_counts, n_iterations=1000):
+    def _bootstrap_sampling(self, K, beta, sample_sizes, distinct_word_counts, n_iterations=500):
+        """
+        Refine the Heaps' Law parameter estimates using bootstrap sampling.
+        """
         bootstrap_estimates = []
 
-        # Function to perform bootstrap sampling and optimization
         def sample_and_optimize(seed):
+            """
+            Perform bootstrap sampling and optimization.
+            """
             np.random.seed(seed)
             indices = np.random.choice(len(sample_sizes), len(sample_sizes), replace=True)
             sampled_sizes = sample_sizes[indices]
-            sampled_counts = np.array(distinct_word_counts)[indices]
+            sampled_counts = distinct_word_counts[indices]
 
             def objective(params):
                 K_b, beta_b = params
@@ -469,7 +485,8 @@ class AdvancedTools(CorpusTools):
             return result.x if result.success else (K, beta)
 
         # Use ThreadPoolExecutor to parallelize the bootstrap sampling
-        with ThreadPoolExecutor() as executor:
+        max_workers = min(multiprocessing.cpu_count(), 32)
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
             seeds = np.random.randint(0, 10000, n_iterations)
             bootstrap_estimates = list(executor.map(sample_and_optimize, seeds))
 
