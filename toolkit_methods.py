@@ -549,7 +549,7 @@ class AdvancedTools(CorpusTools):
             predicted = zipf_func(ranks, alpha, C)
             return np.sum((frequencies - predicted) ** 2)  # Using sum of squared errors
 
-        # Use differential evolution for a robust initial guess
+        # Use differential evolution for a initial guess
         bounds = [(0.5, 1.5), (np.min(frequencies), np.max(frequencies))]
         result = differential_evolution(error_function, bounds)
         if result.success:
@@ -589,7 +589,7 @@ class AdvancedTools(CorpusTools):
             normalized_predicted = predicted / np.max(predicted)
             return np.sum((normalized_freqs - normalized_predicted) ** 2)
 
-        # Use differential evolution for a robust initial guess
+        # Use differential evolution for a initial guess
         bounds = [(1.0, 10.0), (0.1, 3.0)]
         result = differential_evolution(objective_function, bounds)
         if result.success:
