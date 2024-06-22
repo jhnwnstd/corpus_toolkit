@@ -4,14 +4,20 @@ Python toolkit for textual analysis and visualization. Features include lexical 
 ## Modules and Classes
 
 ### CorpusLoader
-- **Purpose**: Loads a text corpus from NLTK or local files/directories. It supports optional downloading if the corpus is not available.
+- **Purpose**: Loads a text corpus from NLTK or local files/directories. It supports optional downloading if the corpus is not available and provides caching for performance optimization.
 - **Key Methods**:
   - `load_corpus()`: Loads and caches the corpus. If the corpus is not locally available, it downloads it if `allow_download` is True.
   - `is_corpus_available()`: Checks if the corpus is locally available or in NLTK.
+  - `_download_corpus()`: (private) Downloads the corpus from NLTK if not available locally.
+  - `_load_corpus_from_path(path)`: (private) Loads the corpus from a local file or directory.
+  - `_load_corpus_from_nltk()`: (private) Loads the corpus from NLTK.
+  - `_load_corpus()`: (private) Determines and executes the appropriate loading method based on the corpus source.
 - **Initialization Parameters**:
   - `corpus_source`: Path to the corpus or NLTK corpus name.
-  - `allow_download`: Boolean to allow downloading the corpus from NLTK.
-  - `custom_download_dir`: Directory to store downloaded corpus.
+  - `allow_download`: Boolean to allow downloading the corpus from NLTK (default: True).
+  - `custom_download_dir`: Directory to store downloaded corpus (optional).
+- **Attributes**:
+  - `corpus_cache`: Stores the loaded corpus to avoid reloading.
 
 ### Tokenizer
 - **Purpose**: Tokenizes text with options to remove stopwords and punctuation.
