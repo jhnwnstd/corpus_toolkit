@@ -566,7 +566,7 @@ class AdvancedTools(CorpusTools):
 
         return self._zipf_alpha
 
-    def calculate_zipf_mandelbrot(self, initial_params=None, verbose=False):
+    def calculate_zipf_mandelbrot(self, verbose=False):
         """
         Fit the Zipf-Mandelbrot distribution to the corpus and find parameters q and s.
         """
@@ -613,7 +613,7 @@ class AdvancedTools(CorpusTools):
         return self._zipf_mandelbrot_params
 
 class EntropyCalculator(CorpusTools):
-    def __init__(self, tokens, q_grams=8):
+    def __init__(self, tokens, q_grams=6):
         # Preprocess tokens similarly to the original method
         cleaned_tokens = [' '.join(reg.sub(r'[^a-zA-Z]', '', token).lower()) for token in tokens if len(token) >= 2]
         super().__init__(cleaned_tokens)
