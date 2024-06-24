@@ -384,6 +384,71 @@ class AdvancedTools(CorpusTools):
 
         return self.herdans_c_value
 
+    def honores_r(self) -> float:
+        """
+        Calculate Honoré's R measure of lexical richness.
+        
+        Honoré's R is defined as:
+        R = 100 * log(N) / (1 - (V1 / V))
+        
+        Where:
+        N is the total number of tokens
+        V is the total number of types (unique words)
+        V1 is the number of hapax legomena (words occurring only once)
+        
+        Returns:
+        float: Honoré's R value
+        """
+        N = self.total_token_count
+        V = len(self.vocabulary())
+        V1 = len(self.x_legomena(1))  # Number of hapax legomena
+        
+        if V == V1:  # Edge case where all words appear only once
+            return float('inf')
+        
+        try:
+            R = 100 * math.log(N) / (1 - (V1 / V))
+            return R
+        except ZeroDivisionError:
+            return float('inf')  # or handle this case as appropriate for your use case
+
+    def honores_j(self) -> float:
+        """
+        Calculate Honoré's J measure of lexical richness using corpus-specific scaling.
+        
+        Honoré's J is defined as a relative measure that compares the observed
+        lexical richness to an expected baseline for the given corpus size.
+        
+        Returns:
+        float: Honoré's J value between 0 and 1
+        """
+        N = self.total_token_count
+        V = len(self.vocabulary())
+        V1 = len(self.x_legomena(1))  # Number of hapax legomena
+        
+        if V == 0 or N == 0:  # Edge cases
+            return 0.0
+        
+        try:
+            # Calculate observed lexical richness
+            observed_richness = (V / N**0.75) * (1 - (V1 / V)**0.5)
+            
+            # Calculate expected lexical richness based on Heaps' Law
+            K, beta = self.calculate_heaps_law()
+            expected_V = K * (N ** beta)
+            expected_V1 = expected_V * (1 / math.e)  # Assumption based on Zipf's law
+            expected_richness = (expected_V / N**0.75) * (1 - (expected_V1 / expected_V)**0.5)
+            
+            # Compare observed to expected
+            J = observed_richness / expected_richness
+            
+            # Apply a scaling function to make the output more interpretable
+            scaled_J = 1 - (1 / (1 + J))  # Maps to (0, 1)
+            
+            return scaled_J
+        except ZeroDivisionError:
+            return 0.0  # Handle edge cases
+
     def calculate_heaps_law(self):
         """
         Estimate parameters for Heaps' Law, which predicts the growth of the number of distinct word types 
