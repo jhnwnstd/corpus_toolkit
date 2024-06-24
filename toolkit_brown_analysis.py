@@ -104,14 +104,6 @@ def advanced_analysis(advanced_tools):
     herdans_c_value = advanced_tools.herdans_c()
     logger.info(f"  Herdan's C (Vocabulary Richness): {herdans_c_value:.2f}")
 
-    # Honoré's R for Lexical Richness
-    honores_r_value = advanced_tools.honores_r()
-    logger.info(f"  Honoré's R (Lexical Richness): {honores_r_value:.2f}")
-
-    # Honoré's J for Lexical Richness
-    honores_j_value = advanced_tools.honores_j()
-    logger.info(f"  Honoré's J (Lexical Richness): {honores_j_value:.2f}")
-
     # Estimating Vocabulary Size with Heaps' Law
     total_tokens = advanced_tools.total_token_count
     estimated_vocab_size = advanced_tools.estimate_vocabulary_size(total_tokens)
