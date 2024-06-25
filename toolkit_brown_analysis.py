@@ -55,8 +55,8 @@ def basic_analysis(corpus_tools):
     logger.info(f"Median Token:        '{median_token_info['token']}' (Frequency: {median_token_info['frequency']})")
     logger.info(f"Mean Token Frequency: {corpus_tools.mean_token_frequency():.2f}")
     logger.info(f"Vocabulary Size:      {len(corpus_tools.vocabulary())}")
-    logger.info(f"Hapax Legomena:       {len(corpus_tools.x_legomena(1))}")
-    logger.info(f"Bi-legomena:          {len(corpus_tools.x_legomena(2))}")
+    logger.info(f"Hapax Legomena Size:  {len(corpus_tools.x_legomena(1))}")
+    logger.info(f"Dis Legomena Size:    {len(corpus_tools.x_legomena(2))}") # Change to any value to get which words occur that many times
     
     logger.info("\nFrequency Analysis:")
     logger.info("-" * 20)
