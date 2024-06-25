@@ -26,12 +26,12 @@ def load_and_tokenize_corpus(corpus_name):
     corpus_loader = CorpusLoader(corpus_name)
     corpus_tokens = corpus_loader.load_corpus()
 
-    tokenizer = Tokenizer(remove_punctuation=True)
-    tokenized_corpus = tokenizer.tokenize(' '.join(corpus_tokens), lowercase=True)
+    tokenizer = Tokenizer(remove_punctuation=True) # Change to False to keep punctuation
+    tokenized_corpus = tokenizer.tokenize(corpus_tokens, lowercase=True) # Change to False to keep case sensitivity
     logger.info(f"Completed tokenizing {corpus_name}")
     return tokenized_corpus
 
-def analyze_corpus(tokenized_corpus, shuffle=False):
+def analyze_corpus(tokenized_corpus, shuffle=False): # Set shuffle to True for better Heaps' parameter estimation
     corpus_tools = CorpusTools(tokenized_corpus, shuffle_tokens=shuffle)
     basic_analysis(corpus_tools)
 
@@ -104,6 +104,10 @@ def advanced_analysis(advanced_tools):
     herdans_c_value = advanced_tools.herdans_c()
     logger.info(f"  Herdan's C (Vocabulary Richness): {herdans_c_value:.2f}")
 
+    # Heaps' K and Beta Parameters
+    K, beta = advanced_tools.calculate_heaps_law()
+    logger.info(f"  Heaps' Law: K = {K:.4f}, beta = {beta:.4f}")
+
     # Estimating Vocabulary Size with Heaps' Law
     total_tokens = advanced_tools.total_token_count
     estimated_vocab_size = advanced_tools.estimate_vocabulary_size(total_tokens)
@@ -163,5 +167,5 @@ def generate_plots(advanced_tools, corpus_name, plots_to_generate):
 
 if __name__ == "__main__":
     tokenized_corpus = load_and_tokenize_corpus(corpus_name)
-    advanced_tools = analyze_corpus(tokenized_corpus, shuffle=True)
+    advanced_tools = analyze_corpus(tokenized_corpus)
     generate_plots(advanced_tools, corpus_name, ["heaps", "zipf", "zipf_mandelbrot"])

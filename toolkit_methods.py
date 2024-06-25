@@ -89,14 +89,14 @@ class CorpusLoader:
         
 class Tokenizer:
     """
-    Tokenize text into individual words.
+    Tokenize text into individual words with configurable options.
     """
     def __init__(self, remove_stopwords=False, remove_punctuation=False, use_nltk_tokenizer=True, stopwords_language='english'):
         # Configuration options for tokenization
-        self.remove_stopwords = remove_stopwords
+        self.remove_stopwords = remove_stopwords # 'True' to remove stopwords
         self.remove_punctuation = remove_punctuation
         self.use_nltk_tokenizer = use_nltk_tokenizer
-        self.stopwords_language = stopwords_language
+        self.stopwords_language = stopwords_language # Language for stopwords removal
         self.custom_regex = None
         # Set to store unwanted tokens (stopwords, punctuation) for removal
         self._unwanted_tokens = set()
@@ -117,6 +117,12 @@ class Tokenizer:
                 nltk.data.find(f'corpora/stopwords/{self.stopwords_language}')
             except LookupError:
                 nltk.download('stopwords', quiet=True)
+        if self.use_nltk_tokenizer:
+            # Ensure NLTK punkt tokenizer is available
+            try:
+                nltk.data.find('tokenizers/punkt')
+            except LookupError:
+                nltk.download('punkt', quiet=True)
 
     def _load_unwanted_tokens(self):
         """Load stopwords and punctuation sets for efficient access."""
@@ -128,20 +134,29 @@ class Tokenizer:
             self._unwanted_tokens.update(string.punctuation)
 
     def set_custom_regex(self, pattern):
-        """Set a custom regex pattern for tokenization with caching."""
+        """Set a custom regex pattern for tokenization."""
         # Compile regex pattern for custom tokenization
         try:
             self.custom_regex = reg.compile(pattern)
         except reg.error as e:
             raise ValueError(f"Invalid regex pattern: {e}")
 
-    def _remove_unwanted_tokens(self, tokens) -> list:
+    def _remove_unwanted_tokens(self, tokens):
         """Remove unwanted tokens (stopwords, punctuation) from a list of tokens."""
         # Filter out tokens present in the unwanted tokens set
         return [token for token in tokens if token not in self._unwanted_tokens and not token.startswith('``')]
 
-    def tokenize(self, text, lowercase=False) -> list:
-        """Tokenize text into individual words based on the selected method."""
+    def tokenize(self, text, lowercase=False):
+        """
+        Tokenize text into individual words based on the selected method.
+        
+        Args:
+            text (str or list): The input text to tokenize.
+            lowercase (bool): Whether to convert the text to lowercase before tokenization.
+        
+        Returns:
+            list: A list of tokenized words.
+        """
         if isinstance(text, list):
             # If input is a list, join it into a single string
             text = ' '.join(text)
