@@ -15,7 +15,6 @@ import regex as reg
 from nltk.corpus import PlaintextCorpusReader, stopwords
 from nltk.tokenize import word_tokenize
 from scipy.optimize import curve_fit, differential_evolution, minimize
-from scipy import optimize
 
 class CorpusLoader:
     """
@@ -473,37 +472,41 @@ class AdvancedTools(CorpusTools):
         # Round the estimated vocabulary size to the nearest integer
         return int(round(estimated_vocab_size))
 
-    def zeta(self, x, N):
-        return np.sum(1 / np.power(np.arange(1, N + 1), x, dtype=np.float64))
-
-    def log_likelihood(self, alpha, frequencies, N):
-        log_ranks = np.log(np.arange(1, len(frequencies) + 1))
-        return -alpha * np.sum(log_ranks * frequencies) - len(frequencies) * np.log(self.zeta(alpha, N))
-
-    def estimate_alpha_mle(self, frequencies, N):
-        result = optimize.minimize_scalar(
-            lambda a: -self.log_likelihood(a, frequencies, N),
-            bounds=(1.01, 2.5),
-            method='bounded'
-        )
-        return result.x
-
     def calculate_zipf_alpha(self):
         """
-        Calculate the alpha parameter for Zipf's Law using Maximum Likelihood Estimation.
+        Calculate the alpha parameter for Zipf's Law using an improved optimization approach.
         """
         if self._zipf_alpha is not None:
             return self._zipf_alpha
 
-        # Extract frequencies
-        frequencies = np.array([freq for _, freq in self.frequency.most_common()], dtype=np.float64)
-        N = len(self.frequency)
+        # Define the Zipf function for curve fitting
+        def zipf_func(rank, alpha, C):
+            return C / np.power(rank, alpha)
 
-        # Estimate alpha using MLE
+        # Extract ranks and frequencies
+        ranks = np.arange(1, len(self.frequency) + 1)
+        frequencies = np.array([freq for _, freq in self.frequency.most_common()])
+
+        # Define the error function for optimization
+        def error_function(params):
+            alpha, C = params
+            predicted = zipf_func(ranks, alpha, C)
+            return np.sum((frequencies - predicted) ** 2)  # Using sum of squared errors
+
+        # Use differential evolution for a initial guess
+        bounds = [(0.5, 1.5), (np.min(frequencies), np.max(frequencies))]
+        result = differential_evolution(error_function, bounds)
+        if result.success:
+            initial_alpha, initial_C = result.x
+        else:
+            raise RuntimeError("Differential evolution failed to converge")
+
+        # Refine the estimate using curve fitting
         try:
-            self._zipf_alpha = self.estimate_alpha_mle(frequencies, N)
-        except Exception as e:
-            raise RuntimeError(f"MLE failed to converge: {str(e)}")
+            popt, _ = curve_fit(zipf_func, ranks, frequencies, p0=[initial_alpha, initial_C], maxfev=10000)
+            self._zipf_alpha = popt[0]
+        except RuntimeError:
+            raise RuntimeError("Curve fitting failed to converge")
 
         return self._zipf_alpha
 
