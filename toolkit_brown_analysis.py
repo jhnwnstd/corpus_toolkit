@@ -31,7 +31,7 @@ def load_and_tokenize_corpus(corpus_name):
     logger.info(f"Completed tokenizing {corpus_name}")
     return tokenized_corpus
 
-def analyze_corpus(tokenized_corpus, shuffle=False): # Set shuffle to True for better Heaps' parameter estimation
+def analyze_corpus(tokenized_corpus, shuffle=True): # Set shuffle to True for better Heaps' parameter estimation
     corpus_tools = CorpusTools(tokenized_corpus, shuffle_tokens=shuffle)
     basic_analysis(corpus_tools)
 
