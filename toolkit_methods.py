@@ -520,7 +520,7 @@ class AdvancedTools(CorpusTools):
         frequencies = np.array([details['frequency'] for details in self.token_details.values()])
         ranks = np.array([details['rank'] for details in self.token_details.values()])
 
-        # Normalizing data
+        # Normalize frequencies
         max_freq = frequencies.max()
         normalized_freqs = frequencies / max_freq
 
@@ -533,7 +533,7 @@ class AdvancedTools(CorpusTools):
             normalized_predicted = predicted / np.max(predicted)
             return np.sum((normalized_freqs - normalized_predicted) ** 2)
 
-        # Use differential evolution for a initial guess
+        # Use differential evolution for initial guess
         bounds = [(1.0, 10.0), (0.1, 3.0)]
         result = differential_evolution(objective_function, bounds)
         if result.success:
@@ -542,17 +542,14 @@ class AdvancedTools(CorpusTools):
             raise RuntimeError("Differential evolution failed to converge")
 
         # Refine the estimate using local optimization
-        try:
-            refined_result = minimize(objective_function, [initial_q, initial_s], method='L-BFGS-B', bounds=bounds, options={'disp': verbose})
-            if refined_result.success:
-                q, s = refined_result.x
-                if verbose:
-                    print(f"Optimization successful. Fitted parameters: q = {q}, s = {s}")
-                self._zipf_mandelbrot_params = q, s
-            else:
-                raise RuntimeError("Local optimization failed to converge")
-        except RuntimeError:
-            raise RuntimeError("Curve fitting failed to converge")
+        refined_result = minimize(objective_function, [initial_q, initial_s], method='L-BFGS-B', bounds=bounds, options={'disp': verbose})
+        if refined_result.success:
+            q, s = refined_result.x
+            if verbose:
+                print(f"Optimization successful. Fitted parameters: q = {q}, s = {s}")
+            self._zipf_mandelbrot_params = q, s
+        else:
+            raise RuntimeError("Local optimization failed to converge")
 
         return self._zipf_mandelbrot_params
 
