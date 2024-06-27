@@ -642,130 +642,82 @@ class EntropyCalculator(CorpusTools):
 
 class CorpusPlots:
     def __init__(self, analyzer, corpus_name, plots_dir='plots'):
-        """
-        Initializes the CorpusPlotter with an analyzer, corpus name, and plots directory.
-        - analyzer: An instance of AdvancedTools or CorpusTools used for data analysis.
-        - corpus_name: Name of the corpus, used for labeling plots.
-        - plots_dir: Directory to save generated plots.
-        """
         self.analyzer = analyzer
         self.corpus_name = corpus_name
         self.plots_dir = Path(plots_dir)
         self.plots_dir.mkdir(exist_ok=True)
 
-    def plot_zipfs_law_fit(self):
-        """
-        Plot the rank-frequency distribution using Zipf's Law focusing on alpha.
-        """
-        # Calculate or retrieve the alpha parameter
-        alpha = self.analyzer._zipf_alpha
-        if alpha is None:
-            alpha = self.analyzer.calculate_zipf_alpha()
+    def _setup_plot(self, title, xlabel, ylabel, figsize=(12, 8)):
+        """Set up a new plot with common elements."""
+        plt.figure(figsize=figsize)
+        plt.title(f"{title} for {self.corpus_name} Corpus")
+        plt.xlabel(xlabel)
+        plt.ylabel(ylabel)
+        plt.grid(True, which="both", ls="--", alpha=0.5)
 
-        # Validate alpha calculation
+    def _save_plot(self, filename):
+        """Save the current plot and close the figure."""
+        plt.tight_layout()
+        plt.savefig(self.plots_dir / f'{filename}_{self.corpus_name}.png', dpi=300)
+        plt.close()
+
+    def plot_zipfs_law_fit(self):
+        alpha = self.analyzer.calculate_zipf_alpha()
         if alpha is None:
             raise ValueError("Alpha calculation failed, cannot plot Zipf's Law fit.")
 
-        # Extract ranks and frequencies
         ranks = np.arange(1, len(self.analyzer.frequency) + 1)
         frequencies = np.array([freq for _, freq in self.analyzer.frequency.most_common()])
-
-        # Normalize frequencies for better visualization
-        normalized_frequencies = frequencies / np.max(frequencies)
-        predicted_freqs = 1 / np.power(ranks, alpha)
-        normalized_predicted_freqs = predicted_freqs / np.max(predicted_freqs)
-
-        # Plotting
-        plt.figure(figsize=(10, 6))
-        plt.plot(ranks, normalized_frequencies, 'o', label='Actual Frequencies', markersize=5, linestyle='', color='blue')
-        plt.plot(ranks, normalized_predicted_freqs, label=f'Zipf\'s Law Fit (alpha={alpha:.2f})', color='red', linestyle='-')
-        plt.xlabel('Rank')
-        plt.ylabel('Normalized Frequency')
-        plt.title(f'Zipf\'s Law Fit for {self.corpus_name} Corpus')
-        plt.xscale('log')
-        plt.yscale('log')
+        
+        self._setup_plot("Zipf's Law Fit", "Rank", "Normalized Frequency")
+        
+        plt.loglog(ranks, frequencies / frequencies.max(), 'o', label='Actual Frequencies', markersize=3, alpha=0.5)
+        plt.loglog(ranks, (1 / np.power(ranks, alpha)) / (1 / np.power(ranks[0], alpha)), 
+                   label=f'Zipf\'s Law Fit (α={alpha:.3f})', color='red', linewidth=2)
+        
         plt.legend()
-        plt.grid(True)
-        plt.savefig(self.plots_dir / f'zipfs_alpha_fit_{self.corpus_name}.png')
-        plt.close()
+        self._save_plot('zipfs_law_fit')
 
     def plot_zipf_mandelbrot_fit(self):
-        """
-        Plots the fitted parameters of the Zipf-Mandelbrot distribution.
-        This distribution is a generalization of Zipf's Law, adding parameters to account for corpus-specific characteristics.
-        """
-        # Calculate or retrieve Zipf-Mandelbrot parameters
-        params = self.analyzer._zipf_mandelbrot_params
+        params = self.analyzer.calculate_zipf_mandelbrot()
         if params is None:
-            params = self.analyzer.calculate_zipf_mandelbrot()
-
-        # Validate parameter calculation
-        if params is None:
-            raise ValueError("q or s calculation failed, cannot plot Zipf-Mandelbrot distribution.")
+            raise ValueError("Zipf-Mandelbrot parameter calculation failed.")
         q, s = params
-        
-        # Extract ranks and frequencies
+
         ranks = np.array([details['rank'] for details in self.analyzer.token_details.values()])
         frequencies = np.array([details['frequency'] for details in self.analyzer.token_details.values()])
 
-        # Define Zipf-Mandelbrot function
         def zipf_mandelbrot(k, q, s):
             return 1 / np.power(k + q, s)
 
-        # Calculate predicted frequencies
-        predicted_freqs = zipf_mandelbrot(ranks, q, s)
+        self._setup_plot("Zipf-Mandelbrot Fit", "Rank", "Normalized Frequency")
 
-        # Normalize for plotting
-        normalized_freqs = frequencies / np.max(frequencies)
-        normalized_predicted_freqs = predicted_freqs / np.max(predicted_freqs)
+        plt.loglog(ranks, frequencies / frequencies.max(), 'o', label='Actual Frequencies', 
+                   markersize=3, alpha=0.5, color='navy')  # Changed to a darker blue
+        plt.loglog(ranks, zipf_mandelbrot(ranks, q, s) / zipf_mandelbrot(ranks[0], q, s), 
+                   label=f'Zipf-Mandelbrot Fit (q={q:.3f}, s={s:.3f})', color='red', linewidth=2)
 
-        # Plotting
-        plt.figure(figsize=(10, 6))
-        plt.plot(ranks, normalized_freqs, label='Actual Frequencies', marker='o', linestyle='', markersize=5)
-        plt.plot(ranks, normalized_predicted_freqs, label=f'Zipf-Mandelbrot Fit (q={q:.2f}, s={s:.2f})', linestyle='-', color='red')
-        plt.xlabel('Rank')
-        plt.ylabel('Normalized Frequency')
-        plt.title(f'Zipf-Mandelbrot Fit for {self.corpus_name} Corpus')
-        plt.xscale('log')
-        plt.yscale('log')
         plt.legend()
-        plt.grid(True)
-        plt.savefig(self.plots_dir / f'zipfs_mandelbrot_fit_{self.corpus_name}.png')
-        plt.close()
+        self._save_plot('zipf_mandelbrot_fit')
 
     def plot_heaps_law(self):
-        """
-        Plots the relationship between the number of unique words (types) and the total number of words (tokens) in the corpus, illustrating Heaps' Law.
-        Demonstrates corpus vocabulary growth.
-        """
-        # Calculate or retrieve Heaps' Law parameters
-        params = self.analyzer._heaps_params
+        params = self.analyzer.calculate_heaps_law()
         if params is None:
-            params = self.analyzer.calculate_heaps_law()
-
-        # Validate parameter calculation
-        if params is None:
-            raise ValueError("Heaps' Law parameters calculation failed, cannot plot Heaps' Law.")
+            raise ValueError("Heaps' Law parameters calculation failed.")
         K, beta = params
 
-        # Prepare data for plotting Heaps' Law
-        total_words = np.arange(1, len(self.analyzer.tokens) + 1)
-        unique_words = []
-        word_set = set()
+        # Generate corpus sizes for sampling
+        corpus_size = len(self.analyzer.tokens)
+        corpus_sizes = self.analyzer.generate_corpus_sizes(corpus_size)
 
-        # Counting unique words (types) as the corpus grows
-        for token in self.analyzer.tokens:
-            word_set.add(token)
-            unique_words.append(len(word_set))
+        # Calculate vocabulary sizes for each corpus size
+        vocab_sizes = self.analyzer.calculate_vocab_sizes(corpus_sizes)
 
-        # Plotting the empirical data and Heaps' Law fit
-        plt.figure(figsize=(10, 6))
-        plt.plot(total_words, unique_words, label='Empirical Data', color='blue')
-        plt.plot(total_words, K * np.power(total_words, beta), '--', label=f"Heaps' Law Fit: K={K:.2f}, beta={beta:.2f}", color='red')
-        plt.xlabel('Token Count')
-        plt.ylabel('Type Count')
-        plt.title(f"Heaps' Law Analysis for {self.corpus_name} Corpus")
+        self._setup_plot("Heaps' Law Analysis", "Token Count", "Type Count")
+
+        plt.plot(corpus_sizes, vocab_sizes, label='Empirical Data', color='blue', alpha=0.7)
+        plt.plot(corpus_sizes, K * np.power(corpus_sizes, beta), '--', 
+                 label=f"Heaps' Law Fit: K={K:.2f}, β={beta:.3f}", color='red', linewidth=2)
+
         plt.legend()
-        plt.grid(True)
-        plt.savefig(self.plots_dir / f'heaps_law_{self.corpus_name}.png')
-        plt.close()
+        self._save_plot('heaps_law')
