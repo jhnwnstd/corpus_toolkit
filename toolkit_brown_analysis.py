@@ -11,7 +11,7 @@ logging.basicConfig(level=logging.INFO, format='%(message)s')
 logger = logging.getLogger('CorpusAnalysis')
 
 # Define corpus name
-corpus_name = 'reuters'  # Change to NLTK corpus name of interest
+corpus_name = 'brown'  # Change to NLTK corpus name of interest
 
 # List of corpora available in NLTK
 # 'brown', 'gutenberg', 'reuters', 'inaugural', 'webtext', 'nps_chat'

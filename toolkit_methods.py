@@ -14,6 +14,7 @@ import numpy as np
 import regex as reg
 from nltk.corpus import PlaintextCorpusReader, stopwords
 from nltk.tokenize import word_tokenize
+from scipy import optimize
 from scipy.optimize import curve_fit, differential_evolution, minimize
 
 class CorpusLoader:
@@ -474,39 +475,33 @@ class AdvancedTools(CorpusTools):
 
     def calculate_zipf_alpha(self):
         """
-        Calculate the alpha parameter for Zipf's Law using an improved optimization approach.
+        Calculate the alpha parameter for Zipf's Law using Maximum Likelihood Estimation
+        with improved numerical stability.
         """
         if self._zipf_alpha is not None:
             return self._zipf_alpha
 
-        # Define the Zipf function for curve fitting
-        def zipf_func(rank, alpha, C):
-            return C / np.power(rank, alpha)
-
-        # Extract ranks and frequencies
-        ranks = np.arange(1, len(self.frequency) + 1)
         frequencies = np.array([freq for _, freq in self.frequency.most_common()])
+        n = len(frequencies)
+        
+        # Normalize frequencies to probabilities
+        probabilities = frequencies / np.sum(frequencies)
 
-        # Define the error function for optimization
-        def error_function(params):
-            alpha, C = params
-            predicted = zipf_func(ranks, alpha, C)
-            return np.sum((frequencies - predicted) ** 2)  # Using sum of squared errors
+        def log_likelihood(alpha):
+            # Use log-sum-exp trick for numerical stability
+            log_ranks = np.log(np.arange(1, n + 1))
+            log_probs = -alpha * log_ranks
+            max_log_prob = np.max(log_probs)
+            return (np.log(np.sum(np.exp(log_probs - max_log_prob))) + max_log_prob 
+                    + np.sum(probabilities * alpha * log_ranks))
 
-        # Use differential evolution for a initial guess
-        bounds = [(0.5, 1.5), (np.min(frequencies), np.max(frequencies))]
-        result = differential_evolution(error_function, bounds)
+        # Use Brent's method to find the alpha that minimizes the negative log-likelihood
+        result = optimize.minimize_scalar(log_likelihood, bracket=(1, 3), method='brent')
+        
         if result.success:
-            initial_alpha, initial_C = result.x
+            self._zipf_alpha = result.x
         else:
-            raise RuntimeError("Differential evolution failed to converge")
-
-        # Refine the estimate using curve fitting
-        try:
-            popt, _ = curve_fit(zipf_func, ranks, frequencies, p0=[initial_alpha, initial_C], maxfev=10000)
-            self._zipf_alpha = popt[0]
-        except RuntimeError:
-            raise RuntimeError("Curve fitting failed to converge")
+            raise RuntimeError("Failed to estimate Zipf's alpha parameter")
 
         return self._zipf_alpha
 
