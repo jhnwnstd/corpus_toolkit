@@ -540,8 +540,8 @@ class EntropyCalculator(CorpusTools):
 
     def calculate_H0(self):
         """Calculate the zeroth-order entropy (H0)."""
-        # Assuming alphabet consists of only letters, case ignored
-        alphabet = set(''.join(self.tokens).replace(' ', ''))
+        # Assuming alphabet consists of only letters and space, case ignored
+        alphabet = set(''.join(self.tokens))
         alphabet_size = len(alphabet)
         return math.log2(alphabet_size)
 
