@@ -110,17 +110,9 @@ class Tokenizer:
     def _ensure_nltk_resources(self):
         """Ensure that NLTK resources are available."""
         if self.remove_stopwords:
-            # Download NLTK stopwords if they are not already available
-            try:
-                nltk.data.find(f'corpora/stopwords/{self.stopwords_language}')
-            except LookupError:
-                nltk.download('stopwords', quiet=True)
+            nltk.download('stopwords', quiet=True)
         if self.use_nltk_tokenizer:
-            # Ensure NLTK punkt tokenizer is available
-            try:
-                nltk.data.find('tokenizers/punkt')
-            except LookupError:
-                nltk.download('punkt', quiet=True)
+            nltk.download('punkt', quiet=True)
 
     def _load_unwanted_tokens(self):
         """Load stopwords and punctuation sets for efficient access."""
@@ -197,16 +189,20 @@ class CorpusTools:
 
         # Shuffle the tokens if required
         if shuffle_tokens:
+            tokens = tokens.copy()
             np.random.shuffle(tokens)
 
-        # Store tokens and calculate frequency distribution
-        self.tokens = tokens
-        self.frequency = Counter(tokens)
+        # Store tokens as a class attribute for later use
+        self.tokens = tokens  # Define self.tokens as an attribute
+
+        # Calculate frequency distribution
+        self.frequency = Counter(self.tokens)  # Use self.tokens for consistency
         self._total_token_count = sum(self.frequency.values())
 
-        # Initialize token details with frequency and rank
-        self.token_details = {token: {'frequency': freq, 'rank': rank}
-                              for rank, (token, freq) in enumerate(self.frequency.most_common(), 1)}
+        # Generate token details for querying
+        self.token_details = {}
+        for rank, (token, freq) in enumerate(self.frequency.most_common(), 1):
+            self.token_details[token] = {'frequency': freq, 'rank': rank}
 
     @property
     def total_token_count(self) -> int:
@@ -405,10 +401,8 @@ class AdvancedTools(CorpusTools):
     def generate_corpus_sizes(self, corpus_size):
         """Generate a range of corpus sizes for sampling."""
         min_size = min(100, max(10, corpus_size // 1000))
-        log_samples = np.logspace(np.log10(min_size), np.log10(corpus_size), num=60)
-        critical_points = 10 ** np.arange(2, int(np.log10(corpus_size)) + 1)
-        combined_samples = np.unique(np.concatenate([log_samples, critical_points, [corpus_size]]))
-        return combined_samples.astype(int)
+        corpus_sizes = np.unique(np.logspace(np.log10(min_size), np.log10(corpus_size), num=60, dtype=int))
+        return corpus_sizes
 
     def calculate_vocab_sizes(self, corpus_sizes):
         """Efficiently calculate vocabulary sizes for given corpus sizes."""
@@ -511,40 +505,29 @@ class AdvancedTools(CorpusTools):
         """
         if self._zipf_mandelbrot_params is not None:
             return self._zipf_mandelbrot_params
-        
-        frequencies = np.array([details['frequency'] for details in self.token_details.values()])
-        ranks = np.array([details['rank'] for details in self.token_details.values()])
 
-        # Normalize frequencies
-        max_freq = frequencies.max()
-        normalized_freqs = frequencies / max_freq
+        frequencies = np.array([freq for freq in self.frequency.values()])
+        ranks = np.array([rank for rank in range(1, len(frequencies) + 1)])
 
-        def zipf_mandelbrot_vectorized(ranks, q, s):
-            return 1 / np.power(ranks + q, s)
+        def zipf_mandelbrot(k, q, s):
+            return 1 / ((k + q) ** s)
 
         def objective_function(params):
             q, s = params
-            predicted = zipf_mandelbrot_vectorized(ranks, q, s)
-            normalized_predicted = predicted / np.max(predicted)
-            return np.sum((normalized_freqs - normalized_predicted) ** 2)
+            predicted = zipf_mandelbrot(ranks, q, s)
+            predicted /= predicted.sum()  # Normalize
+            actual = frequencies / frequencies.sum()
+            return np.sum((actual - predicted) ** 2)
 
-        # Use differential evolution for initial guess
-        bounds = [(1.0, 10.0), (0.1, 3.0)]
+        bounds = [(0.01, 10.0), (0.5, 2.5)]
         result = differential_evolution(objective_function, bounds)
         if result.success:
-            initial_q, initial_s = result.x
-        else:
-            raise RuntimeError("Differential evolution failed to converge")
-
-        # Refine the estimate using local optimization
-        refined_result = minimize(objective_function, [initial_q, initial_s], method='L-BFGS-B', bounds=bounds, options={'disp': verbose})
-        if refined_result.success:
-            q, s = refined_result.x
-            if verbose:
-                print(f"Optimization successful. Fitted parameters: q = {q}, s = {s}")
+            q, s = result.x
             self._zipf_mandelbrot_params = q, s
+            if verbose:
+                print(f"Fitted parameters: q = {q}, s = {s}")
         else:
-            raise RuntimeError("Local optimization failed to converge")
+            raise RuntimeError("Failed to estimate Zipf-Mandelbrot parameters")
 
         return self._zipf_mandelbrot_params
 
