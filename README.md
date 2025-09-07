@@ -100,9 +100,11 @@ Python toolkit for textual analysis and visualization. Features include lexical 
 - KenLM (optional, for q-gram entropy calculations)
 
 ## Installation
+
 Install the required packages using pip:
+
 ```bash
-pip install nltk numpy matplotlib scipy
+pip install -r requirements.txt
 ```
 
 ### KenLM Installation (Optional)
@@ -117,47 +119,117 @@ sudo apt-get install -y cmake build-essential libeigen3-dev libboost-all-dev
 Then, you can use the following Python script to download and compile KenLM:
 
 ```python
+#!/usr/bin/env python3
+"""
+Simple KenLM setup script for Linux environments.
+Downloads, compiles, and installs KenLM with optimal settings.
+
+Usage:
+    sudo apt-get update
+    sudo apt-get install -y cmake build-essential libeigen3-dev libboost-all-dev
+    python3 setup_kenlm.py
+"""
+
 from pathlib import Path
 import subprocess
-import os
+import tempfile
 import urllib.request
+import tarfile
+import multiprocessing
+import shutil
 
-def system_command(command):
-    """Execute a system command with subprocess."""
-    subprocess.run(command, shell=True, check=True)
+def run_cmd(cmd, cwd=None):
+    """Run command with error handling."""
+    try:
+        subprocess.run(cmd, check=True, cwd=cwd, shell=isinstance(cmd, str))
+    except subprocess.CalledProcessError as e:
+        print(f"Error: Command failed: {cmd}")
+        exit(1)
 
-def download_file(url, local_filename=None):
-    """Download a file from a URL using urllib."""
-    if not local_filename:
-        local_filename = url.split('/')[-1]
-    with urllib.request.urlopen(url) as response, open(local_filename, 'wb') as out_file:
-        out_file.write(response.read())
-    return local_filename
+def download_and_extract(url, extract_to):
+    """Download and extract tarball."""
+    print("Downloading KenLM...")
+    with urllib.request.urlopen(url) as response:
+        with tarfile.open(fileobj=response, mode="r|gz") as tar:
+            # Security check - prevent path traversal
+            def safe_extract(members):
+                for member in members:
+                    if member.path.startswith('/') or '..' in member.path:
+                        continue
+                    yield member
+            tar.extractall(path=extract_to, members=safe_extract(tar))
 
-def compile_kenlm(max_order=12):
-    """Compile KenLM with the specified maximum order."""
+def setup_kenlm():
+    """Main setup function."""
+    # Check dependencies
+    deps = ['cmake', 'make', 'g++']
+    for dep in deps:
+        if shutil.which(dep) is None:
+            print(f"Error: {dep} not found. Install dependencies first:")
+            print("sudo apt-get update")
+            print("sudo apt-get install -y cmake build-essential libeigen3-dev libboost-all-dev")
+            exit(1)
+    
+    # Configuration
     url = "https://kheafield.com/code/kenlm.tar.gz"
-    kenlm_tar = download_file(url)
-
-    # Extract KenLM archive
-    system_command(f'tar -xvzf {kenlm_tar}')
-
-    # Setup KenLM directory paths using pathlib
-    kenlm_dir = Path('kenlm')
-    build_dir = kenlm_dir / 'build'
-    build_dir.mkdir(parents=True, exist_ok=True)
-
-    # Compile KenLM
-    os.chdir(build_dir)
-    system_command(f'cmake .. -DKENLM_MAX_ORDER={max_order}')
-    system_command('make -j 4')
-    os.chdir('../../')
-
-    # Clean up downloaded files
-    Path(kenlm_tar).unlink()
+    install_dir = Path.home() / ".local"
+    jobs = multiprocessing.cpu_count()
+    max_order = 12  # Good default for most use cases
+    
+    print(f"Setting up KenLM with max order {max_order} using {jobs} cores...")
+    
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+        
+        # Download and extract
+        download_and_extract(url, tmpdir)
+        
+        # Find KenLM directory
+        kenlm_dir = next(tmpdir.rglob("*kenlm*"), None) or next(tmpdir.iterdir())
+        build_dir = kenlm_dir / "build"
+        build_dir.mkdir(exist_ok=True)
+        
+        print("Configuring...")
+        run_cmd([
+            "cmake", "..",
+            f"-DKENLM_MAX_ORDER={max_order}",
+            f"-DCMAKE_INSTALL_PREFIX={install_dir}",
+            "-DCMAKE_BUILD_TYPE=Release",
+            "-DCMAKE_CXX_FLAGS=-O3 -DNDEBUG -march=native",
+            "-DFORCE_STATIC=OFF"
+        ], cwd=build_dir)
+        
+        print(f"Building with {jobs} jobs...")
+        run_cmd(["make", f"-j{jobs}"], cwd=build_dir)
+        
+        # Install
+        print("Installing...")
+        install_dir.mkdir(parents=True, exist_ok=True)
+        run_cmd(["make", "install"], cwd=build_dir)
+        
+        # Add to PATH if needed
+        bin_dir = install_dir / "bin"
+        bashrc = Path.home() / ".bashrc"
+        path_line = f'export PATH="$PATH:{bin_dir}"'
+        
+        if bashrc.exists():
+            content = bashrc.read_text()
+            if str(bin_dir) not in content:
+                print("Adding to PATH...")
+                with open(bashrc, "a") as f:
+                    f.write(f"\n# KenLM\n{path_line}\n")
+                print(f"Added {bin_dir} to PATH in ~/.bashrc")
+                print("Run 'source ~/.bashrc' or restart your shell")
+        
+        print(f"\n✅ KenLM installed successfully!")
+        print(f"📁 Install location: {install_dir}")
+        print(f"🔧 Binaries available: {', '.join(b.name for b in bin_dir.glob('*') if b.is_file())}")
+        print(f"📖 Test with: {bin_dir}/lmplz --help")
+        print("\n💡 If you get library errors, you may need:")
+        print("   sudo apt-get install -y zlib1g-dev libbz2-dev liblzma-dev")
 
 if __name__ == "__main__":
-    compile_kenlm(max_order=8)
+    setup_kenlm()
 ```
 
 ## Example Use (See toolkit_brown_analysis.py for more expansive use demonstration)

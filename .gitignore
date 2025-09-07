@@ -166,3 +166,6 @@ cython_debug/
 # Ignore the following files in the repository
 *.png 
 *.jpg
+
+# Claude AI assistant files
+CLAUDE.md
