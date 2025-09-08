@@ -449,27 +449,14 @@ class AdvancedTools(CorpusTools):
             return self.herdans_c_value  # Use cached value if available
         
         # Utilize properties from CorpusTools
-        V = len(self.vocabulary())  # Distinct token count (Vocabulary size)
+        V = len(self.frequency)     # Distinct token count (Vocabulary size)
         N = self.total_token_count  # Total token count (Corpus size)
 
-        # Check for edge cases to prevent division by zero or logarithm of zero
-        if V == 0 or N == 0:
-            raise ValueError("Vocabulary size (V) or total token count (N) cannot be zero.")
+        # Check for edge cases to prevent division by zero or log(1)
+        if V <= 1 or N <= 1:
+            raise ValueError("Vocabulary size (V) or total token count (N) cannot be one or less than one.")
 
-        # Handling very large values of V and N
-        MAX_FLOAT = sys.float_info.max  # Maximum float value in the environment
-        if V > MAX_FLOAT or N > MAX_FLOAT:
-            # Apply scaling to reduce the values
-            scaling_factor = max(V, N) / MAX_FLOAT
-            V /= scaling_factor
-            N /= scaling_factor
-
-        # Calculating Herdan's C with error handling
-        try:
-            self.herdans_c_value = math.log(V) / math.log(N)
-        except ValueError as e:
-            # Handle potential math domain errors
-            raise ValueError(f"Error in calculating Herdan's C: {e}")
+        self.herdans_c_value = float(math.log(V) / math.log(N))
 
         return self.herdans_c_value
 
@@ -487,7 +474,7 @@ class AdvancedTools(CorpusTools):
         return corpus_sizes
 
     def calculate_vocab_sizes(self, corpus_sizes: np.ndarray) -> List[int]:
-        """FIXED: Single pass vocabulary size calculation with checkpoints."""
+        """Single pass vocabulary size calculation with checkpoints."""
         checkpoints = set(int(s) for s in corpus_sizes)
         seen: Set[str] = set()
         vocab_sizes = []
