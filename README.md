@@ -220,12 +220,12 @@ def setup_kenlm():
                     f.write(f"\n# KenLM\n{path_line}\n")
                 print(f"Added {bin_dir} to PATH in ~/.bashrc")
                 print("Run 'source ~/.bashrc' or restart your shell")
-        
-        print(f"\n✅ KenLM installed successfully!")
-        print(f"📁 Install location: {install_dir}")
-        print(f"🔧 Binaries available: {', '.join(b.name for b in bin_dir.glob('*') if b.is_file())}")
-        print(f"📖 Test with: {bin_dir}/lmplz --help")
-        print("\n💡 If you get library errors, you may need:")
+
+        print(f"\nKenLM installed successfully!")
+        print(f"Install location: {install_dir}")
+        print(f"Binaries available: {', '.join(b.name for b in bin_dir.glob('*') if b.is_file())}")
+        print(f"Test with: {bin_dir}/lmplz --help")
+        print("\nIf you get library errors, you may need:")
         print("   sudo apt-get install -y zlib1g-dev libbz2-dev liblzma-dev")
 
 if __name__ == "__main__":

@@ -4,7 +4,8 @@ import string
 import subprocess
 import sys
 import tempfile
-import threading  # Added for thread-safe initialization
+import threading
+import warnings
 from collections import Counter
 from pathlib import Path
 from typing import List, Set, Union, Tuple, Optional, Dict, Any
@@ -16,8 +17,8 @@ import numpy as np
 import regex as reg
 from nltk.corpus import PlaintextCorpusReader, stopwords
 from nltk.tokenize import word_tokenize
-from scipy import optimize
-from scipy.optimize import curve_fit, differential_evolution, minimize
+import scipy.optimize as optimize
+from scipy.optimize import curve_fit, differential_evolution
 
 ##########################################################################
 #                                CorpusLoader
@@ -54,11 +55,16 @@ class CorpusLoader:
         return [token for fileid in corpus_reader.fileids() for token in corpus_reader.words(fileid)]
 
     def _load_corpus_from_nltk(self) -> List[str]:
-        """Load the corpus from NLTK."""
-        # Access corpus from NLTK using the corpus name
-        corpus_reader = getattr(nltk.corpus, self.corpus_source)
-        # Return all tokens from the corpus
-        return [token for fileid in corpus_reader.fileids() for token in corpus_reader.words(fileid)]
+        """Load corpus from NLTK with clear error handling."""
+        try:
+            corpus_reader = getattr(nltk.corpus, self.corpus_source)
+        except AttributeError as e:
+            raise LookupError(
+                f"NLTK corpus '{self.corpus_source}' not found. "
+                f"Try allow_download=True or supply a local path."
+            ) from e
+        return [token for fileid in corpus_reader.fileids() 
+                for token in corpus_reader.words(fileid)]
 
     def _load_corpus(self) -> List[str]:
         """Load the corpus into memory.
@@ -104,12 +110,16 @@ class CorpusLoader:
         return self.corpus_cache
 
     def is_corpus_available(self) -> bool:
-        """Check if the corpus is available locally or through NLTK."""
-        try:
-            # Check if the corpus can be found by NLTK
-            nltk.data.find(self.corpus_source)
+        """Robust availability check for local paths and NLTK corpora."""
+        path = Path(self.corpus_source)
+        if path.exists():
             return True
-        except LookupError:
+        try:
+            # Probe actual corpus accessor for more reliable detection
+            corpus = getattr(nltk.corpus, self.corpus_source)
+            _ = corpus.fileids()  # Test access
+            return True
+        except (AttributeError, LookupError):
             return False
 
 
@@ -119,8 +129,11 @@ class CorpusLoader:
 
 class Tokenizer:
     """
-    Tokenize text into individual words with configurable options.
+    High-performance tokenizer with caching and robust defaults.
     """
+    
+    # Class-level cache for stopwords to avoid repeated downloads
+    _STOP_CACHE: Dict[Tuple[str, bool], Set[str]] = {}
 
     def __init__(
         self,
@@ -129,16 +142,14 @@ class Tokenizer:
         use_nltk_tokenizer: bool = True,
         stopwords_language: str = 'english'
     ) -> None:
-        # Configuration options for tokenization
-        self.remove_stopwords = remove_stopwords  # 'True' to remove stopwords
+        self.remove_stopwords = remove_stopwords
         self.remove_punctuation = remove_punctuation
         self.use_nltk_tokenizer = use_nltk_tokenizer
-        self.stopwords_language = stopwords_language  # Language for stopwords removal
+        self.stopwords_language = stopwords_language
         self.custom_regex = None
-        # Set to store unwanted tokens (stopwords, punctuation) for removal
         self._unwanted_tokens: Set[str] = set()
         self._initialized = False
-        self._init_lock = threading.Lock()  # Lock for thread-safe initialization
+        self._init_lock = threading.Lock()
 
     def _initialize(self) -> None:
         """Initialize the tokenizer by ensuring NLTK resources are available and loading unwanted tokens."""
@@ -156,13 +167,22 @@ class Tokenizer:
             nltk.download('punkt', quiet=True)
 
     def _load_unwanted_tokens(self) -> None:
-        """Load stopwords and punctuation sets for efficient access."""
+        """Load unwanted tokens with caching for performance."""
+        cache_key = (self.stopwords_language, self.remove_punctuation)
+        cached = self._STOP_CACHE.get(cache_key)
+        
+        if cached is not None:
+            self._unwanted_tokens = set(cached)
+            return
+
+        unwanted = set()
         if self.remove_stopwords:
-            # Update the set with stopwords for the specified language
-            self._unwanted_tokens.update(stopwords.words(self.stopwords_language))
+            unwanted.update(stopwords.words(self.stopwords_language))
         if self.remove_punctuation:
-            # Update the set with string punctuation characters
-            self._unwanted_tokens.update(string.punctuation)
+            unwanted.update(string.punctuation)
+        
+        self._STOP_CACHE[cache_key] = set(unwanted)
+        self._unwanted_tokens = unwanted
 
     def set_custom_regex(self, pattern: str) -> None:
         """Set a custom regex pattern for tokenization."""
@@ -224,12 +244,13 @@ class CorpusTools:
 
     def __init__(self, tokens: List[str], shuffle_tokens: bool = False) -> None:
         """
-        Initialize the CorpusTools object with a list of tokens.
+        Initialize CorpusTools with input validation.
         
         :param tokens: List of tokens (words) in the corpus.
-        :param shuffle_tokens: Boolean indicating whether to shuffle the tokens. Useful for unbiased analysis.
+        :param shuffle_tokens: Boolean indicating whether to shuffle the tokens.
         """
-        # Validate that all elements in tokens are strings
+        if not tokens:
+            raise ValueError("Token list cannot be empty.")
         if not all(isinstance(token, str) for token in tokens):
             raise ValueError("All tokens must be strings.")
 
@@ -316,7 +337,7 @@ class CorpusTools:
         else:
             raise ValueError(f"Token with rank {rank} is not found in the corpus.")
 
-    def cumulative_frequency_analysis(self, lower_percent: float = 0, upper_percent: float = 100) -> List[Dict[str, Any]]:
+    def cumulative_frequency_analysis(self, lower_percent=0, upper_percent=100):
         """
         Analyze tokens within a specific cumulative frequency range. 
         Useful for understanding the distribution of common vs. rare tokens.
@@ -324,22 +345,25 @@ class CorpusTools:
         :param lower_percent: Lower bound of the cumulative frequency range (in percentage).
         :param upper_percent: Upper bound of the cumulative frequency range (in percentage).
         :return: List of dictionaries with token details in the specified range.
-        :raises ValueError: If the provided percentages are out of bounds.
+        :raises ValueError: If the provided percentages are out of bounds or lower > upper.
         """
         # Validate percentage inputs
-        if not 0 <= lower_percent <= 100 or not 0 <= upper_percent <= 100:
-            raise ValueError("Percentages must be between 0 and 100.")
+        if not 0 <= lower_percent <= 100 or not 0 <= upper_percent <= 100 or lower_percent > upper_percent:
+            raise ValueError("Percentages must be 0–100 and lower ≤ upper.")
 
         # Calculate the numeric thresholds based on percentages
-        lower_threshold = self._total_token_count * (lower_percent / 100)
-        upper_threshold = self._total_token_count * (upper_percent / 100)
+        lower = self._total_token_count * (lower_percent / 100.0)
+        upper = self._total_token_count * (upper_percent / 100.0)
 
-        # Extract tokens within the specified frequency range
-        return [
-            {'token': token, **details}
-            for token, details in self.token_details.items()
-            if lower_threshold <= details['frequency'] <= upper_threshold
-        ]
+        # Extract tokens within the specified cumulative frequency range
+        out, cum = [], 0
+        for token, freq in self.frequency.most_common():
+            cum += freq
+            if lower <= cum <= upper:
+                out.append({'token': token, **self.token_details[token]})
+            elif cum > upper:
+                break
+        return out
 
     def list_tokens_in_rank_range(self, start_rank: int, end_rank: int) -> List[Dict[str, Any]]:
         """
@@ -463,13 +487,23 @@ class AdvancedTools(CorpusTools):
         return corpus_sizes
 
     def calculate_vocab_sizes(self, corpus_sizes: np.ndarray) -> List[int]:
-        """Efficiently calculate vocabulary sizes for given corpus sizes."""
+        """FIXED: Single pass vocabulary size calculation with checkpoints."""
+        checkpoints = set(int(s) for s in corpus_sizes)
+        seen: Set[str] = set()
         vocab_sizes = []
-        unique_words = set()
+        checkpoint_results = {}
+        
+        for idx, token in enumerate(self.tokens, 1):
+            seen.add(token)
+            if idx in checkpoints:
+                checkpoint_results[idx] = len(seen)
+                if len(checkpoint_results) == len(checkpoints):
+                    break
+        
+        # Return results in order of corpus_sizes
         for size in corpus_sizes:
-            # This approach re-uses the same set, extending it each iteration
-            unique_words.update(self.tokens[len(unique_words):size])
-            vocab_sizes.append(len(unique_words))
+            vocab_sizes.append(checkpoint_results.get(int(size), len(seen)))
+        
         return vocab_sizes
 
     def calculate_heaps_law(self) -> Optional[Tuple[float, float]]:
@@ -502,6 +536,7 @@ class AdvancedTools(CorpusTools):
             self._heaps_params = tuple(popt)
             return self._heaps_params
         except RuntimeError:
+            warnings.warn("Heaps' Law fitting failed")
             return None
 
     def estimate_vocabulary_size(self, total_tokens: int) -> int:
@@ -525,34 +560,29 @@ class AdvancedTools(CorpusTools):
 
     def calculate_zipf_alpha(self) -> float:
         """
-        Calculate the alpha parameter for Zipf's Law using Maximum Likelihood Estimation
-        with improved numerical stability.
+        Calculate the alpha parameter for Zipf's Law using Maximum Likelihood Estimation with improved numerical stability.
         """
         if self._zipf_alpha is not None:
             return self._zipf_alpha
 
-        frequencies = np.array([freq for _, freq in self.frequency.most_common()])
-        n = len(frequencies)
-        
-        # Normalize frequencies to probabilities
-        probabilities = frequencies / np.sum(frequencies)
+        freqs = np.array([f for _, f in self.frequency.most_common()], float)
+        n = len(freqs)
+        probs = freqs / freqs.sum()
+        log_ranks = np.log(np.arange(1, n + 1, dtype=float))
 
-        def log_likelihood(alpha: float) -> float:
-            # Use log-sum-exp trick for numerical stability
-            log_ranks = np.log(np.arange(1, n + 1))
-            log_probs = -alpha * log_ranks
-            max_log_prob = np.max(log_probs)
-            return (np.log(np.sum(np.exp(log_probs - max_log_prob))) + max_log_prob 
-                    + np.sum(probabilities * alpha * log_ranks))
+        def nll(alpha: float) -> float:
+            if alpha <= 0:
+                return np.inf
+            log_unnorm = -alpha * log_ranks
+            m = log_unnorm.max()
+            log_Z = m + np.log(np.exp(log_unnorm - m).sum())  # log-sum-exp
+            # Expected negative log-prob under empirical probs:
+            return float(log_Z + alpha * np.sum(probs * log_ranks))
 
-        # Use Brent's method to find the alpha that minimizes the negative log-likelihood
-        result = optimize.minimize_scalar(log_likelihood, bracket=(1, 3), method='brent')
-        
-        if result.success:
-            self._zipf_alpha = float(result.x)
-        else:
+        res = optimize.minimize_scalar(nll, bounds=(1e-3, 5.0), method='bounded')
+        if not res.success:
             raise RuntimeError("Failed to estimate Zipf's alpha parameter")
-
+        self._zipf_alpha = float(res.x)
         return self._zipf_alpha
 
     def calculate_zipf_mandelbrot(self, verbose: bool = False) -> Tuple[float, float]:
@@ -562,21 +592,22 @@ class AdvancedTools(CorpusTools):
         if self._zipf_mandelbrot_params is not None:
             return self._zipf_mandelbrot_params
 
-        frequencies = np.array([freq for freq in self.frequency.values()])
-        ranks = np.array([rank for rank in range(1, len(frequencies) + 1)])
+        freqs = np.array([f for _, f in self.frequency.most_common()], float)
+        ranks = np.arange(1, len(freqs) + 1, dtype=float)
+        p_emp = freqs / freqs.sum()
 
-        def zipf_mandelbrot(k: np.ndarray, q: float, s: float) -> np.ndarray:
-            return 1.0 / np.power(k + q, s)
+        def model(k, q, s):
+            w = 1.0 / np.power(k + q, s)
+            return w / w.sum()
 
-        def objective_function(params: Tuple[float, float]) -> float:
+        def objective(params):
             q, s = params
-            predicted = zipf_mandelbrot(ranks, q, s)
-            predicted /= predicted.sum()  # Normalize
-            actual = frequencies / frequencies.sum()
-            return float(np.sum((actual - predicted) ** 2))
+            if q <= 0 or s <= 0:
+                return np.inf
+            return float(np.sum((model(ranks, q, s) - p_emp) ** 2))
 
         bounds = [(0.01, 10.0), (0.5, 2.5)]
-        result = differential_evolution(objective_function, bounds)
+        result = differential_evolution(objective, bounds)
         if result.success:
             q, s = result.x
             self._zipf_mandelbrot_params = (q, s)
@@ -594,11 +625,15 @@ class AdvancedTools(CorpusTools):
 
 class EntropyCalculator(CorpusTools):
     def __init__(self, tokens: List[str], q_grams: int = 6) -> None:
+        if not (1 <= q_grams <= 12):
+            raise ValueError("q_grams must be between 1 and 12")
         # Preprocess tokens similarly to the original method
         cleaned_tokens = [
             ' '.join(reg.sub(r'[^a-zA-Z]', '', token).lower())
             for token in tokens if len(token) >= 2
         ]
+        if not cleaned_tokens:
+            raise ValueError("No valid tokens after cleaning for entropy calculation")
         super().__init__(cleaned_tokens)
         self.q_grams = q_grams
 
@@ -610,10 +645,16 @@ class EntropyCalculator(CorpusTools):
         return math.log2(alphabet_size)
 
     def calculate_H1(self) -> float:
-        """Calculate the first-order entropy (H1)."""
-        letter_freq = Counter(''.join(self.tokens).replace(' ', ''))
-        total_letters = sum(letter_freq.values())
-        return -sum((freq / total_letters) * math.log2(freq / total_letters) for freq in letter_freq.values())
+        """Calculate first-order entropy with better performance."""
+        text = ''.join(self.tokens).replace(' ', '')
+        if not text:
+            return 0.0
+            
+        letter_freq = Counter(text)
+        total_letters = len(text)  # More efficient than sum()
+        
+        return -sum((freq / total_letters) * math.log2(freq / total_letters) 
+                   for freq in letter_freq.values())
 
     def calculate_H2(self) -> float:
         """
@@ -635,36 +676,45 @@ class EntropyCalculator(CorpusTools):
         
         return float(H2)
 
+    def _ensure_kenlm_tools(self) -> None:
+        """Verify KenLM tools are available."""
+        for exe in ("lmplz", "build_binary"):
+            if shutil.which(exe) is None:
+                raise FileNotFoundError(
+                    f"Required KenLM tool '{exe}' not found in PATH. "
+                    "Install KenLM and ensure its bin/ directory is on PATH."
+                )
+
     def train_kenlm_model(self, text: str) -> Tuple[Path, Path]:
-        """Train a KenLM model with the given text and return the model path, without immediate cleanup."""
-        tempdir_path = Path(tempfile.mkdtemp())  # Create temporary directory
+        """SECURITY FIX: Train KenLM model without shell injection vulnerability."""
+        self._ensure_kenlm_tools()
+        
+        tempdir_path = Path(tempfile.mkdtemp())
         text_file_path = tempdir_path / "corpus.txt"
-        
-        with text_file_path.open('w') as text_file:
-            text_file.write('\n'.join(self.tokens))
-        
-        model_file_path = tempdir_path / "model.klm"
         arpa_file_path = tempdir_path / "model.arpa"
+        model_file_path = tempdir_path / "model.klm"
         
-        # Run lmplz with output redirected to suppress terminal output
+        # Write corpus safely
+        text_file_path.write_text('\n'.join(self.tokens), encoding='utf-8')
+        
+        # Run lmplz safely without shell injection
+        with text_file_path.open('rb') as fin, arpa_file_path.open('wb') as fout:
+            subprocess.run(
+                ["lmplz", "-o", str(self.q_grams), "--discount_fallback"],
+                check=True,
+                stdin=fin,
+                stdout=fout,
+                stderr=subprocess.DEVNULL
+            )
+        
+        # Run build_binary safely
         subprocess.run(
-            f"lmplz -o {self.q_grams} --discount_fallback < {text_file_path} > {arpa_file_path}",
-            shell=True,
+            ["build_binary", str(arpa_file_path), str(model_file_path)],
             check=True,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL
         )
         
-        # Run build_binary to convert ARPA file to binary model
-        subprocess.run(
-            f"build_binary {arpa_file_path} {model_file_path}",
-            shell=True,
-            check=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
-        )
-        
-        # Return both model file path and temp directory to manage cleanup later
         return model_file_path, tempdir_path
 
     def calculate_H3_kenlm(self) -> float:
