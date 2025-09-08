@@ -1,16 +1,3 @@
-"""
-Corpus analysis driver:
-- Loads and tokenizes an NLTK corpus.
-- Runs basic, advanced, and entropy analyses.
-- Generates Heaps, Zipf, and Zipf–Mandelbrot plots.
-
-Notes on refactor (no functional change):
-- Removed misuse of @lru_cache on functions that took unhashable objects (would raise TypeError).
-- Centralized logging helpers; consistent f-strings and formatting.
-- Added type hints and docstrings; preserved defaults and outputs.
-- Kept NLTK downloads quiet and unconditional as in the original.
-"""
-
 from __future__ import annotations
 
 import logging

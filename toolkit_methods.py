@@ -624,122 +624,138 @@ class AdvancedTools(CorpusTools):
 ##########################################################################
 
 class EntropyCalculator(CorpusTools):
+    """
+    Entropy metrics (H0–H3) with KenLM-backed H3 at character level.
+    - Cleaning: letters only, lowercased; each original token becomes a sequence of
+      space-separated characters (e.g., 'the' -> 't h e'). This mirrors your original code.
+    - H0 excludes spaces from the alphabet (unchanged).
+    - H1/H2 computed over characters (no spaces).
+    - H3 uses KenLM; ln→bits conversion matches your “correct” runs.
+    """
+
+    # ------------------------------- Init -------------------------------- #
     def __init__(self, tokens: List[str], q_grams: int = 6) -> None:
         if not (1 <= q_grams <= 12):
             raise ValueError("q_grams must be between 1 and 12")
-        # Preprocess tokens similarly to the original method
+
+        # Keep original cleaning: letters-only, lowercased, characters space-separated
         cleaned_tokens = [
-            ' '.join(reg.sub(r'[^a-zA-Z]', '', token).lower())
-            for token in tokens if len(token) >= 2
+            " ".join(reg.sub(r"[^a-zA-Z]", "", token).lower())
+            for token in tokens
+            if len(token) >= 2
         ]
         if not cleaned_tokens:
             raise ValueError("No valid tokens after cleaning for entropy calculation")
+
         super().__init__(cleaned_tokens)
         self.q_grams = q_grams
 
+        # Precompute common concatenations to avoid recomputing on every call
+        self._chars_no_space: str = "".join(self.tokens).replace(" ", "")
+        self._char_stream: str = " ".join(self.tokens)   # 't h e c a t ...'
+        self._train_text: str = "\n".join(self.tokens)   # per-word sentence: ensures </s>
+
+    # --------------------------- H0 / H1 / H2 ---------------------------- #
     def calculate_H0(self) -> float:
-        """Calculate the zeroth-order entropy (H0)."""
-        # Assuming alphabet consists of only letters and space, case ignored
-        alphabet = set(''.join(self.tokens))
-        alphabet_size = len(alphabet)
-        return math.log2(alphabet_size)
+        """Zeroth-order entropy over the observed alphabet (spaces excluded)."""
+        if not self._chars_no_space:
+            return 0.0
+        return math.log2(len(set(self._chars_no_space)))
 
     def calculate_H1(self) -> float:
-        """Calculate first-order entropy with better performance."""
-        text = ''.join(self.tokens).replace(' ', '')
+        """Shannon entropy (bits/char) over characters (spaces excluded)."""
+        text = self._chars_no_space
         if not text:
             return 0.0
-            
-        letter_freq = Counter(text)
-        total_letters = len(text)  # More efficient than sum()
-        
-        return -sum((freq / total_letters) * math.log2(freq / total_letters) 
-                   for freq in letter_freq.values())
+        counts = Counter(text)
+        N = len(text)
+        return -sum((c / N) * math.log2(c / N) for c in counts.values())
 
     def calculate_H2(self) -> float:
-        """
-        Calculate the Rényi entropy of order 2 (H2).
-        This is also known as collision entropy.
-        """
-        # Join all tokens and remove spaces to consider character distribution
-        text = ''.join(self.tokens).replace(' ', '')
-        
-        # Count character frequencies
-        char_freq = Counter(text)
-        total_chars = len(text)
-        
-        # Calculate probabilities
-        probabilities = np.array([count / total_chars for count in char_freq.values()])
-        
-        # Calculate H2
-        H2 = -np.log2(np.sum(probabilities**2))
-        
-        return float(H2)
+        """Rényi entropy of order 2 (collision entropy) over characters (spaces excluded)."""
+        text = self._chars_no_space
+        if not text:
+            return 0.0
+        counts = Counter(text)
+        N = len(text)
+        p = np.fromiter((c / N for c in counts.values()), dtype=float)
+        return float(-np.log2(np.sum(p * p)))
+
+    # ------------------------------ KenLM -------------------------------- #
+    @staticmethod
+    def _require(exe: str) -> None:
+        if shutil.which(exe) is None:
+            raise FileNotFoundError(
+                f"Required KenLM tool '{exe}' not found in PATH. "
+                "Install KenLM and ensure its bin/ directory is on PATH."
+            )
 
     def _ensure_kenlm_tools(self) -> None:
-        """Verify KenLM tools are available."""
-        for exe in ("lmplz", "build_binary"):
-            if shutil.which(exe) is None:
-                raise FileNotFoundError(
-                    f"Required KenLM tool '{exe}' not found in PATH. "
-                    "Install KenLM and ensure its bin/ directory is on PATH."
-                )
+        self._require("lmplz")
+        self._require("build_binary")
 
     def train_kenlm_model(self, text: str) -> Tuple[Path, Path]:
-        """SECURITY FIX: Train KenLM model without shell injection vulnerability."""
+        """
+        Train KenLM from the *provided* text.
+        Expectation (as used here):
+          - `text` is already space-tokenized at the character level.
+          - one sentence per line (so </s> exists for build_binary).
+        """
         self._ensure_kenlm_tools()
-        
-        tempdir_path = Path(tempfile.mkdtemp())
-        text_file_path = tempdir_path / "corpus.txt"
-        arpa_file_path = tempdir_path / "model.arpa"
-        model_file_path = tempdir_path / "model.klm"
-        
-        # Write corpus safely
-        text_file_path.write_text('\n'.join(self.tokens), encoding='utf-8')
-        
-        # Run lmplz safely without shell injection
-        with text_file_path.open('rb') as fin, arpa_file_path.open('wb') as fout:
+
+        tmp = Path(tempfile.mkdtemp())
+        txt = tmp / "corpus.txt"
+        arpa = tmp / "model.arpa"
+        klm = tmp / "model.klm"
+
+        txt.write_text(text, encoding="utf-8")
+
+        # Build ARPA (stdin -> stdout) with discount_fallback, same as before
+        with txt.open("rb") as fin, arpa.open("wb") as fout:
             subprocess.run(
                 ["lmplz", "-o", str(self.q_grams), "--discount_fallback"],
                 check=True,
                 stdin=fin,
                 stdout=fout,
-                stderr=subprocess.DEVNULL
+                stderr=subprocess.DEVNULL,
             )
-        
-        # Run build_binary safely
+
+        # Build binary (strict; requires </s> present)
         subprocess.run(
-            ["build_binary", str(arpa_file_path), str(model_file_path)],
+            ["build_binary", str(arpa), str(klm)],
             check=True,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
+            stderr=subprocess.DEVNULL,
         )
-        
-        return model_file_path, tempdir_path
+
+        return klm, tmp
 
     def calculate_H3_kenlm(self) -> float:
-        model_path, tempdir_path = self.train_kenlm_model(' '.join(self.tokens))
-        model = kenlm.Model(str(model_path))
-        
-        prepared_text = ' '.join(self.tokens)
-        log_prob = model.score(prepared_text, bos=False, eos=False) / math.log(2)
-        num_tokens = len(prepared_text.split()) - self.q_grams + 1
-        H3 = -log_prob / num_tokens
-        
-        # Cleanup: remove the temporary directory after the model has been used
-        shutil.rmtree(tempdir_path)
-        
-        return float(H3)
+        """
+        Character-level H3 (bits per character n-gram) using KenLM.
+        - Train: one sentence per original word (ensures </s>).
+        - Eval:  one continuous stream of character tokens.
+        - Ln→bits conversion preserved: score(...) / log(2).
+        - Denominator preserved: (#tokens - q + 1).
+        """
+        model_path, tmp = self.train_kenlm_model(self._train_text)
+        try:
+            model = kenlm.Model(str(model_path))
 
-    def calculate_redundancy(self, H3: float, H0: float) -> float:
-        """Calculate redundancy based on H3 and H0."""
-        return (1 - H3 / H0) * 100
+            # KenLM .score returns ln(prob); convert to bits
+            log_prob_bits = model.score(self._char_stream, bos=False, eos=False) / math.log(2)
 
-    def cleanup_temp_directory(self) -> None:
-        """Remove the temporary directory used for KenLM model training."""
-        if hasattr(self, 'tempdir_path') and self.tempdir_path.exists():
-            shutil.rmtree(self.tempdir_path)
-            print("Temporary directory cleaned up.")
+            T = len(self._char_stream.split())                 # number of character tokens
+            denom = max(1, T - self.q_grams + 1)               # character n-grams
+            return float(-log_prob_bits / denom)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    # ---------------------------- Redundancy ----------------------------- #
+    @staticmethod
+    def calculate_redundancy(H3: float, H0: float) -> float:
+        """Redundancy (%) relative to alphabet capacity (unchanged)."""
+        return (1 - H3 / H0) * 100 if H0 > 0 else 0.0
 
 
 ##########################################################################
