@@ -763,106 +763,166 @@ class EntropyCalculator(CorpusTools):
 ##########################################################################
 
 class CorpusPlots:
-    def __init__(self, analyzer: CorpusTools, corpus_name: str, plots_dir: str = 'plots') -> None:
+    """
+    Minimal, robust plotting for Zipf, Zipf–Mandelbrot, and Heaps.
+
+    Changes requested:
+      - Heaps' Law back to original *linear* scaling (no log axes by default).
+      - Distinct color scheme per plot type:
+          * Zipf:           points=tab:blue, fit=tab:red
+          * Zipf–Mandelbrot points=navy,     fit=tab:red
+          * Heaps:          empirical=tab:blue, fit=tab:red (dashed)
+    """
+
+    def __init__(
+        self,
+        analyzer,
+        corpus_name: str,
+        plots_dir: str | Path = "plots",
+        *,
+        dpi: int = 300,
+        file_format: str = "png",
+        transparent: bool = False,
+    ) -> None:
         self.analyzer = analyzer
-        self.corpus_name = corpus_name
+        self.corpus_name = str(corpus_name)
         self.plots_dir = Path(plots_dir)
-        self.plots_dir.mkdir(exist_ok=True)
+        self.plots_dir.mkdir(parents=True, exist_ok=True)
+        self.dpi = int(dpi)
+        self.file_format = str(file_format)
+        self.transparent = bool(transparent)
 
-    def _setup_plot(self, title: str, xlabel: str, ylabel: str, figsize: Tuple[int, int] = (12, 8)) -> None:
-        """Set up a new plot with common elements."""
-        plt.figure(figsize=figsize)
-        plt.title(f"{title} for {self.corpus_name} Corpus")
-        plt.xlabel(xlabel)
-        plt.ylabel(ylabel)
-        plt.grid(True, which="both", ls="--", alpha=0.5)
+        # Consistent rank/frequency arrays from most_common()
+        items = self.analyzer.frequency.most_common()
+        self._ranks = np.arange(1, len(items) + 1, dtype=float)
+        self._freqs = np.array([f for _, f in items], dtype=float)
+        self._freqs_norm_max = (
+            self._freqs / self._freqs.max() if self._freqs.size else self._freqs
+        )
 
-    def _save_plot(self, filename: str) -> None:
-        """Save the current plot and close the figure."""
-        plt.tight_layout()
-        plt.savefig(self.plots_dir / f'{filename}_{self.corpus_name}.png', dpi=300)
-        plt.close()
+    # ----------------------------- helpers ------------------------------ #
+    def _new_axes(
+        self,
+        title: str,
+        xlabel: str,
+        ylabel: str,
+        figsize: Tuple[int, int] = (12, 8),
+    ):
+        fig, ax = plt.subplots(figsize=figsize, dpi=self.dpi)
+        ax.set_title(f"{title} — {self.corpus_name}")
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel(ylabel)
+        ax.grid(True, which="both", linestyle="--", alpha=0.5)
+        return fig, ax
 
-    def plot_zipfs_law_fit(self) -> None:
+    def _save(self, fig, stem: str) -> Path:
+        out = self.plots_dir / f"{stem}_{self.corpus_name}.{self.file_format}"
+        fig.tight_layout()
+        fig.savefig(out, dpi=self.dpi, transparent=self.transparent)
+        plt.close(fig)
+        return out
+
+    @staticmethod
+    def _downsample(x: np.ndarray, y: np.ndarray, *, top_n: Optional[int], stride: int):
+        """Optional point thinning for faster scatter; math unchanged."""
+        if top_n is not None and top_n > 0:
+            x, y = x[:top_n], y[:top_n]
+        if stride > 1:
+            x, y = x[::stride], y[::stride]
+        return x, y
+
+    # ---------------------------- Zipf plot ----------------------------- #
+    def plot_zipfs_law_fit(
+        self,
+        *,
+        top_n: Optional[int] = None,
+        stride: int = 1,
+        figsize: Tuple[int, int] = (12, 8),
+    ) -> Path:
         alpha = self.analyzer.calculate_zipf_alpha()
         if alpha is None:
             raise ValueError("Alpha calculation failed, cannot plot Zipf's Law fit.")
 
-        ranks = np.arange(1, len(self.analyzer.frequency) + 1)
-        frequencies = np.array([freq for _, freq in self.analyzer.frequency.most_common()])
-        
-        self._setup_plot("Zipf's Law Fit", "Rank", "Normalized Frequency")
-        
-        plt.loglog(ranks, frequencies / frequencies.max(), 'o', label='Actual Frequencies', markersize=3, alpha=0.5)
-        plt.loglog(
-            ranks,
-            (1 / np.power(ranks, alpha)) / (1 / np.power(ranks[0], alpha)),
-            label=f"Zipf's Law Fit (α={alpha:.3f})",
-            color='red',
-            linewidth=2
-        )
-        
-        plt.legend()
-        self._save_plot('zipfs_law_fit')
+        ranks = self._ranks
+        y_emp = self._freqs_norm_max
+        y_fit = (1.0 / np.power(ranks, alpha)) / (1.0 / np.power(ranks[0], alpha))
 
-    def plot_zipf_mandelbrot_fit(self) -> None:
+        x_sc, y_sc = self._downsample(ranks, y_emp, top_n=top_n, stride=stride)
+
+        fig, ax = self._new_axes("Zipf's Law Fit", "Rank", "Normalized Frequency", figsize)
+        ax.set_xscale("log"); ax.set_yscale("log")
+
+        # Distinct colors: blue points, red fit
+        ax.plot(x_sc, y_sc, linestyle="none", marker="o", color="tab:blue",
+                markersize=3, alpha=0.5, label="Empirical")
+        ax.plot(ranks, y_fit, color="tab:red", linewidth=2, label=f"Zipf Fit (α={alpha:.3f})")
+
+        ax.legend()
+        return self._save(fig, "zipfs_law_fit")
+
+    # ---------------------- Zipf–Mandelbrot plot ------------------------ #
+    def plot_zipf_mandelbrot_fit(
+        self,
+        *,
+        top_n: Optional[int] = None,
+        stride: int = 1,
+        figsize: Tuple[int, int] = (12, 8),
+    ) -> Path:
         params = self.analyzer.calculate_zipf_mandelbrot()
         if params is None:
-            raise ValueError("Zipf-Mandelbrot parameter calculation failed.")
+            raise ValueError("Zipf–Mandelbrot parameter calculation failed.")
         q, s = params
 
-        ranks = np.array([details['rank'] for details in self.analyzer.token_details.values()])
-        frequencies = np.array([details['frequency'] for details in self.analyzer.token_details.values()])
+        ranks = self._ranks
+        y_emp = self._freqs_norm_max
+        w = 1.0 / np.power(ranks + q, s)
+        y_fit = w / w[0]
 
-        def zipf_mandelbrot(k: np.ndarray, q: float, s: float) -> np.ndarray:
-            return 1 / np.power(k + q, s)
+        x_sc, y_sc = self._downsample(ranks, y_emp, top_n=top_n, stride=stride)
 
-        self._setup_plot("Zipf-Mandelbrot Fit", "Rank", "Normalized Frequency")
+        fig, ax = self._new_axes("Zipf–Mandelbrot Fit", "Rank", "Normalized Frequency", figsize)
+        ax.set_xscale("log"); ax.set_yscale("log")
 
-        plt.loglog(
-            ranks,
-            frequencies / frequencies.max(),
-            'o',
-            label='Actual Frequencies',
-            markersize=3,
-            alpha=0.5,
-            color='navy'  # Changed to a darker blue
-        )
-        plt.loglog(
-            ranks,
-            zipf_mandelbrot(ranks, q, s) / zipf_mandelbrot(ranks[0], q, s),
-            label=f"Zipf-Mandelbrot Fit (q={q:.3f}, s={s:.3f})",
-            color='red',
-            linewidth=2
-        )
+        # Distinct colors: navy points, red fit
+        ax.plot(x_sc, y_sc, linestyle="none", marker="o", color="navy",
+                markersize=3, alpha=0.5, label="Empirical")
+        ax.plot(ranks, y_fit, color="tab:red", linewidth=2,
+                label=f"ZM Fit (q={q:.3f}, s={s:.3f})")
 
-        plt.legend()
-        self._save_plot('zipf_mandelbrot_fit')
+        ax.legend()
+        return self._save(fig, "zipf_mandelbrot_fit")
 
-    def plot_heaps_law(self) -> None:
+    # ---------------------------- Heaps plot ---------------------------- #
+    def plot_heaps_law(
+        self,
+        *,
+        figsize: Tuple[int, int] = (12, 8),
+    ) -> Path:
+        """
+        Heaps' Law with original *linear* scaling (no log axes).
+        """
         params = self.analyzer.calculate_heaps_law()
         if params is None:
             raise ValueError("Heaps' Law parameters calculation failed.")
         K, beta = params
 
-        # Generate corpus sizes for sampling
         corpus_size = len(self.analyzer.tokens)
         corpus_sizes = self.analyzer.generate_corpus_sizes(corpus_size)
-
-        # Calculate vocabulary sizes for each corpus size
         vocab_sizes = self.analyzer.calculate_vocab_sizes(corpus_sizes)
 
-        self._setup_plot("Heaps' Law Analysis", "Token Count", "Type Count")
+        fig, ax = self._new_axes("Heaps' Law Analysis", "Token Count", "Type Count", figsize)
 
-        plt.plot(corpus_sizes, vocab_sizes, label='Empirical Data', color='blue', alpha=0.7)
-        plt.plot(
+        # Distinct colors: blue empirical, red dashed fit; linear axes
+        ax.plot(corpus_sizes, vocab_sizes, color="tab:blue",
+                marker="o", markersize=3, linewidth=1.5, alpha=0.7, label="Empirical")
+        ax.plot(
             corpus_sizes,
             K * np.power(corpus_sizes, beta),
-            '--',
-            label=f"Heaps' Law Fit: K={K:.2f}, β={beta:.3f}",
-            color='red',
-            linewidth=2
+            linestyle="--",
+            color="tab:red",
+            linewidth=2,
+            label=f"Heaps Fit: K={K:.2f}, β={beta:.3f}",
         )
 
-        plt.legend()
-        self._save_plot('heaps_law')
+        ax.legend()
+        return self._save(fig, "heaps_law")
