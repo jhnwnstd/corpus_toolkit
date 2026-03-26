@@ -10,10 +10,8 @@ from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
-import matplotlib  # noqa: E402
-
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt  # noqa: E402
+import matplotlib; matplotlib.use("Agg")  # noqa: E702,E402
+import matplotlib.pyplot as plt
 import nltk  # type: ignore[import-untyped]
 import numpy as np
 import regex as reg  # type: ignore[import-untyped]

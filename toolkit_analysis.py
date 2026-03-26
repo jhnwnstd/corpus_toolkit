@@ -88,7 +88,7 @@ def analyze_corpus(
     advanced_tools = AdvancedTools(corpus_tools.tokens)
     advanced_analysis(advanced_tools)
 
-    # Entropy uses original (unshuffled) order — shuffling destroys the
+    # Entropy uses original (unshuffled) order shuffling destroys the
     # cross-word character context that KenLM's n-gram model relies on.
     entropy_calculator = EntropyCalculator(list(tokenized))
     entropy_metrics(entropy_calculator)
