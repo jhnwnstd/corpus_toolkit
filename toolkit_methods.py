@@ -1,35 +1,46 @@
+from __future__ import annotations
+
 import math
 import shutil
 import string
 import subprocess
-import sys
 import tempfile
 import threading
 import warnings
 from collections import Counter
 from pathlib import Path
-from typing import List, Set, Union, Tuple, Optional, Dict, Any
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
-import kenlm
 import matplotlib.pyplot as plt
-import nltk
+import nltk  # type: ignore[import-untyped]
 import numpy as np
-import regex as reg
-from nltk.corpus import PlaintextCorpusReader, stopwords
-from nltk.tokenize import word_tokenize
+import regex as reg  # type: ignore[import-untyped]
 import scipy.optimize as optimize
+from nltk.corpus import PlaintextCorpusReader, stopwords  # type: ignore[import-untyped]
+from nltk.tokenize import word_tokenize  # type: ignore[import-untyped]
 from scipy.optimize import curve_fit, differential_evolution
+
+try:
+    import kenlm  # type: ignore[import-not-found]
+except ImportError:  # pragma: no cover
+    kenlm = None  # type: ignore[assignment]
 
 ##########################################################################
 #                                CorpusLoader
 ##########################################################################
+
 
 class CorpusLoader:
     """
     Load a corpus from NLTK or a local file/directory, optimized for performance.
     """
 
-    def __init__(self, corpus_source: str, allow_download: bool = True, custom_download_dir: Optional[str] = None):
+    def __init__(
+        self,
+        corpus_source: str,
+        allow_download: bool = True,
+        custom_download_dir: Optional[str] = None,
+    ):
         # Source of the corpus (either a local path or an NLTK corpus name)
         self.corpus_source = corpus_source
         # Flag to allow automatic download from NLTK if the corpus isn't available locally
@@ -37,22 +48,33 @@ class CorpusLoader:
         # Custom directory for downloading corpora (if needed)
         self.custom_download_dir = custom_download_dir
         # Cache for loaded corpus to avoid reloading
-        self.corpus_cache = None
+        self.corpus_cache: Optional[List[str]] = None
 
     def _download_corpus(self) -> None:
         """Download the corpus from NLTK."""
         # Append custom download directory to NLTK's data path if provided
-        if self.custom_download_dir and self.custom_download_dir not in nltk.data.path:
+        if (
+            self.custom_download_dir
+            and self.custom_download_dir not in nltk.data.path
+        ):
             nltk.data.path.append(self.custom_download_dir)
         # Download corpus using NLTK's download utility
-        nltk.download(self.corpus_source, download_dir=self.custom_download_dir, quiet=True)
+        nltk.download(
+            self.corpus_source,
+            download_dir=self.custom_download_dir,
+            quiet=True,
+        )
 
     def _load_corpus_from_path(self, path: Path) -> List[str]:
         """Load the corpus from a local file or directory."""
         # Use PlaintextCorpusReader to read tokens from the local path
-        corpus_reader = PlaintextCorpusReader(str(path), '.*')
+        corpus_reader = PlaintextCorpusReader(str(path), ".*")
         # Return all tokens from the corpus
-        return [token for fileid in corpus_reader.fileids() for token in corpus_reader.words(fileid)]
+        return [
+            str(token)
+            for fileid in corpus_reader.fileids()
+            for token in corpus_reader.words(fileid)
+        ]
 
     def _load_corpus_from_nltk(self) -> List[str]:
         """Load corpus from NLTK with clear error handling."""
@@ -63,32 +85,14 @@ class CorpusLoader:
                 f"NLTK corpus '{self.corpus_source}' not found. "
                 f"Try allow_download=True or supply a local path."
             ) from e
-        return [token for fileid in corpus_reader.fileids() 
-                for token in corpus_reader.words(fileid)]
+        return [
+            token
+            for fileid in corpus_reader.fileids()
+            for token in corpus_reader.words(fileid)
+        ]
 
     def _load_corpus(self) -> List[str]:
-        """Load the corpus into memory.
-        
-        For very large corpora, consider using a generator to yield batches:
-        (Uncomment the generator-based approach for efficient streaming.)
-        
-        Example generator-based approach:
-        
-        # def _load_corpus(self, batch_size=10000):
-        #     path = Path(self.corpus_source)
-        #     if path.is_file() or path.is_dir():
-        #         corpus_reader = PlaintextCorpusReader(str(path), '.*')
-        #     else:
-        #         corpus_reader = getattr(nltk.corpus, self.corpus_source)
-        #     for fileid in corpus_reader.fileids():
-        #         tokens_iter = iter(corpus_reader.words(fileid))
-        #         while True:
-        #             batch = list(itertools.islice(tokens_iter, batch_size))
-        #             if not batch:
-        #                 break
-        #             yield from batch
-        """
-        # Determine if the source is a local path or an NLTK corpus name
+        """Load the corpus into memory."""
         path = Path(self.corpus_source)
         if path.is_file() or path.is_dir():
             return self._load_corpus_from_path(path)
@@ -127,20 +131,21 @@ class CorpusLoader:
 #                                Tokenizer
 ##########################################################################
 
+
 class Tokenizer:
     """
     High-performance tokenizer with caching and robust defaults.
     """
-    
+
     # Class-level cache for stopwords to avoid repeated downloads
-    _STOP_CACHE: Dict[Tuple[str, bool], Set[str]] = {}
+    _STOP_CACHE: Dict[Tuple[str, bool, bool], Set[str]] = {}
 
     def __init__(
         self,
         remove_stopwords: bool = False,
         remove_punctuation: bool = False,
         use_nltk_tokenizer: bool = True,
-        stopwords_language: str = 'english'
+        stopwords_language: str = "english",
     ) -> None:
         self.remove_stopwords = remove_stopwords
         self.remove_punctuation = remove_punctuation
@@ -162,15 +167,19 @@ class Tokenizer:
     def _ensure_nltk_resources(self) -> None:
         """Ensure that NLTK resources are available."""
         if self.remove_stopwords:
-            nltk.download('stopwords', quiet=True)
+            nltk.download("stopwords", quiet=True)
         if self.use_nltk_tokenizer:
-            nltk.download('punkt', quiet=True)
+            nltk.download("punkt", quiet=True)
 
     def _load_unwanted_tokens(self) -> None:
         """Load unwanted tokens with caching for performance."""
-        cache_key = (self.stopwords_language, self.remove_punctuation)
+        cache_key = (
+            self.stopwords_language,
+            self.remove_stopwords,
+            self.remove_punctuation,
+        )
         cached = self._STOP_CACHE.get(cache_key)
-        
+
         if cached is not None:
             self._unwanted_tokens = set(cached)
             return
@@ -180,7 +189,7 @@ class Tokenizer:
             unwanted.update(stopwords.words(self.stopwords_language))
         if self.remove_punctuation:
             unwanted.update(string.punctuation)
-        
+
         self._STOP_CACHE[cache_key] = set(unwanted)
         self._unwanted_tokens = unwanted
 
@@ -195,22 +204,29 @@ class Tokenizer:
     def _remove_unwanted_tokens(self, tokens: List[str]) -> List[str]:
         """Remove unwanted tokens (stopwords, punctuation) from a list of tokens."""
         # Filter out tokens present in the unwanted tokens set
-        return [token for token in tokens if token not in self._unwanted_tokens and not token.startswith('``')]
+        return [
+            token
+            for token in tokens
+            if token not in self._unwanted_tokens
+            and not token.startswith("``")
+        ]
 
-    def tokenize(self, text: Union[str, List[str]], lowercase: bool = False) -> List[str]:
+    def tokenize(
+        self, text: Union[str, List[str]], lowercase: bool = False
+    ) -> List[str]:
         """
         Tokenize text into individual words based on the selected method.
-        
+
         Args:
             text (str or list): The input text to tokenize.
             lowercase (bool): Whether to convert the text to lowercase before tokenization.
-        
+
         Returns:
             list: A list of tokenized words.
         """
         if isinstance(text, list):
             # If input is a list, join it into a single string
-            text = ' '.join(text)
+            text = " ".join(text)
 
         if lowercase:
             # Convert text to lowercase if specified
@@ -237,15 +253,18 @@ class Tokenizer:
 #                              CorpusTools
 ##########################################################################
 
+
 class CorpusTools:
     """
     Provides basic corpus analysis tools like frequency distribution and querying capabilities.
     """
 
-    def __init__(self, tokens: List[str], shuffle_tokens: bool = False) -> None:
+    def __init__(
+        self, tokens: List[str], shuffle_tokens: bool = False
+    ) -> None:
         """
         Initialize CorpusTools with input validation.
-        
+
         :param tokens: List of tokens (words) in the corpus.
         :param shuffle_tokens: Boolean indicating whether to shuffle the tokens.
         """
@@ -263,13 +282,19 @@ class CorpusTools:
         self.tokens = tokens  # Define self.tokens as an attribute
 
         # Calculate frequency distribution
-        self.frequency = Counter(self.tokens)  # Use self.tokens for consistency
+        self.frequency = Counter(
+            self.tokens
+        )  # Use self.tokens for consistency
         self._total_token_count = sum(self.frequency.values())
 
         # Generate token details for querying
         self.token_details: Dict[str, Dict[str, Any]] = {}
-        for rank, (token, freq) in enumerate(self.frequency.most_common(), 1):
-            self.token_details[token] = {'frequency': freq, 'rank': rank}
+        # Rank-indexed list for O(1) rank lookups (index 0 = rank 1)
+        ranked = self.frequency.most_common()
+        self._rank_to_token: List[Tuple[str, int]] = []
+        for rank, (token, freq) in enumerate(ranked, 1):
+            self.token_details[token] = {"frequency": freq, "rank": rank}
+            self._rank_to_token.append((token, freq))
 
     @property
     def total_token_count(self) -> int:
@@ -280,7 +305,7 @@ class CorpusTools:
 
     def find_median_token(self) -> Dict[str, Union[str, int]]:
         """
-        Find the median token based on frequency. 
+        Find the median token based on frequency.
         The median token is the token in the middle of the sorted frequency distribution.
 
         :return: Dictionary with the median token and its frequency.
@@ -292,7 +317,7 @@ class CorpusTools:
             cumulative += freq
             # Return the token once the cumulative count crosses the median index
             if cumulative >= median_index:
-                return {'token': token, 'frequency': freq}
+                return {"token": token, "frequency": freq}
         return {}
 
     def mean_token_frequency(self) -> float:
@@ -314,7 +339,7 @@ class CorpusTools:
         token = token.lower()
         details = self.token_details.get(token)
         if details:
-            return {'token': token, **details}
+            return {"token": token, **details}
         else:
             raise ValueError(f"Token '{token}' not found in the corpus.")
 
@@ -326,20 +351,18 @@ class CorpusTools:
         :return: Dictionary with token details for the given rank.
         :raises ValueError: If the rank is out of range.
         """
-        # Validate rank range
-        if rank < 1 or rank > len(self.token_details):
-            raise ValueError(f"Rank {rank} is out of range. Valid ranks are from 1 to {len(self.token_details)}.")
-        
-        # Find the token with the specified rank
-        token = next((t for t, d in self.token_details.items() if d['rank'] == rank), None)
-        if token:
-            return {'token': token, 'rank': rank, **self.token_details[token]}
-        else:
-            raise ValueError(f"Token with rank {rank} is not found in the corpus.")
+        if rank < 1 or rank > len(self._rank_to_token):
+            raise ValueError(
+                f"Rank {rank} is out of range. Valid ranks are from 1 to {len(self._rank_to_token)}."
+            )
+        token, freq = self._rank_to_token[rank - 1]
+        return {"token": token, "rank": rank, "frequency": freq}
 
-    def cumulative_frequency_analysis(self, lower_percent=0, upper_percent=100):
+    def cumulative_frequency_analysis(
+        self, lower_percent=0, upper_percent=100
+    ):
         """
-        Analyze tokens within a specific cumulative frequency range. 
+        Analyze tokens within a specific cumulative frequency range.
         Useful for understanding the distribution of common vs. rare tokens.
 
         :param lower_percent: Lower bound of the cumulative frequency range (in percentage).
@@ -348,7 +371,11 @@ class CorpusTools:
         :raises ValueError: If the provided percentages are out of bounds or lower > upper.
         """
         # Validate percentage inputs
-        if not 0 <= lower_percent <= 100 or not 0 <= upper_percent <= 100 or lower_percent > upper_percent:
+        if (
+            not 0 <= lower_percent <= 100
+            or not 0 <= upper_percent <= 100
+            or lower_percent > upper_percent
+        ):
             raise ValueError("Percentages must be 0–100 and lower ≤ upper.")
 
         # Calculate the numeric thresholds based on percentages
@@ -360,14 +387,16 @@ class CorpusTools:
         for token, freq in self.frequency.most_common():
             cum += freq
             if lower <= cum <= upper:
-                out.append({'token': token, **self.token_details[token]})
+                out.append({"token": token, **self.token_details[token]})
             elif cum > upper:
                 break
         return out
 
-    def list_tokens_in_rank_range(self, start_rank: int, end_rank: int) -> List[Dict[str, Any]]:
+    def list_tokens_in_rank_range(
+        self, start_rank: int, end_rank: int
+    ) -> List[Dict[str, Any]]:
         """
-        List tokens within a specific rank range. 
+        List tokens within a specific rank range.
         Useful for examining the most/least frequent subsets of tokens.
 
         :param start_rank: Starting rank of the range.
@@ -375,15 +404,15 @@ class CorpusTools:
         :return: List of dictionaries with token details within the specified rank range.
         :raises ValueError: If the rank range is out of valid bounds.
         """
-        # Validate rank range inputs
-        if not (1 <= start_rank <= end_rank <= len(self.token_details)):
-            raise ValueError(f"Rank range is out of valid bounds. Valid ranks are from 1 to {len(self.token_details)}.")
-
-        # Extract tokens within the specified rank range
+        if not (1 <= start_rank <= end_rank <= len(self._rank_to_token)):
+            raise ValueError(
+                f"Rank range is out of valid bounds. Valid ranks are from 1 to {len(self._rank_to_token)}."
+            )
         return [
-            {'token': token, **details}
-            for token, details in self.token_details.items()
-            if start_rank <= details['rank'] <= end_rank
+            {"token": token, "frequency": freq, "rank": rank}
+            for rank, (token, freq) in enumerate(
+                self._rank_to_token[start_rank - 1 : end_rank], start_rank
+            )
         ]
 
     def x_legomena(self, x: int) -> Set[str]:
@@ -397,7 +426,11 @@ class CorpusTools:
         """
         if not isinstance(x, int) or x < 1:
             raise ValueError("x must be a positive integer.")
-        return {token for token, details in self.token_details.items() if details['frequency'] == x}
+        return {
+            token
+            for token, details in self.token_details.items()
+            if details["frequency"] == x
+        }
 
     def vocabulary(self) -> Set[str]:
         """
@@ -410,6 +443,7 @@ class CorpusTools:
 #                             AdvancedTools
 ##########################################################################
 
+
 class AdvancedTools(CorpusTools):
     """
     Advanced analysis on a corpus of text, extending CorpusTools.
@@ -418,24 +452,29 @@ class AdvancedTools(CorpusTools):
 
     def __init__(self, tokens: List[str]) -> None:
         super().__init__(tokens)
-        # Caches to store precomputed parameters for efficient reuse
-        self._zipf_alpha: Optional[float] = None  # For Zipf's Law
-        self._zipf_c: Optional[float] = None      # For Zipf's Law
-        self._heaps_params: Optional[Tuple[float, float]] = None  # For Heaps' Law
-        self._zipf_mandelbrot_params: Optional[Tuple[float, float]] = None  # For Zipf-Mandelbrot Law
-        self.herdans_c_value: Optional[float] = None  # For Herdan's C measure
+
+        # Pre-compute ranked frequency array (used by Zipf, ZM, fit_quality, xmin)
+        items = self.frequency.most_common()
+        self._ranked_freqs = np.array([f for _, f in items], dtype=float)
+        self._ranks = np.arange(1, len(items) + 1, dtype=float)
+
+        # Caches for fitted parameters
+        self._zipf_alpha: Optional[float] = None
+        self._heaps_params: Optional[Tuple[float, float]] = None
+        self._zipf_mandelbrot_params: Optional[Tuple[float, float]] = None
+        self.herdans_c_value: Optional[float] = None
 
     def yules_k(self) -> float:
         """
-        Calculate Yule's K measure, indicating lexical diversity. Higher values suggest greater diversity.
+        Calculate Yule's K measure (10^4 * Simpson's concentration index).
+        Higher K means MORE repetition / LESS lexical diversity.
+        K = 10^4 * sum(f_i*(f_i-1)) / (N*(N-1))
         """
-        # Using numpy for efficient array operations on token frequencies
-        freqs = np.array([details['frequency'] for details in self.token_details.values()])
-        N = np.sum(freqs)  # Total token count
-        sum_fi_fi_minus_1 = np.sum(freqs * (freqs - 1))  # Sum of f_i * (f_i - 1) across all frequencies
-        # Yule's K equation
-        K = 10**4 * (sum_fi_fi_minus_1 / (N * (N - 1))) if N > 1 else 0
-        return float(K)
+        freqs = np.fromiter(self.frequency.values(), dtype=float)
+        N = freqs.sum()
+        if N <= 1:
+            return 0.0
+        return float(1e4 * np.sum(freqs * (freqs - 1)) / (N * (N - 1)))
 
     def herdans_c(self) -> float:
         """
@@ -447,29 +486,37 @@ class AdvancedTools(CorpusTools):
         """
         if self.herdans_c_value is not None:
             return self.herdans_c_value  # Use cached value if available
-        
+
         # Utilize properties from CorpusTools
-        V = len(self.frequency)     # Distinct token count (Vocabulary size)
+        V = len(self.frequency)  # Distinct token count (Vocabulary size)
         N = self.total_token_count  # Total token count (Corpus size)
 
         # Check for edge cases to prevent division by zero or log(1)
         if V <= 1 or N <= 1:
-            raise ValueError("Vocabulary size (V) or total token count (N) cannot be one or less than one.")
+            raise ValueError(
+                "Vocabulary size (V) or total token count (N) cannot be one or less than one."
+            )
 
         self.herdans_c_value = float(math.log(V) / math.log(N))
 
         return self.herdans_c_value
 
     @staticmethod
-    def heaps_law(N: float, k: float, beta: float) -> float:
+    def heaps_law(N: np.ndarray, k: float, beta: float) -> np.ndarray:
         """Heap's Law function."""
-        return k * (N ** beta)
+        return k * (N**beta)
 
     def generate_corpus_sizes(self, corpus_size: int) -> np.ndarray:
         """Generate a range of corpus sizes for sampling."""
         min_size = min(100, max(10, corpus_size // 1000))
+        # Ensure min_size never exceeds corpus_size
+        min_size = min(min_size, corpus_size)
+        if min_size == corpus_size:
+            return np.array([corpus_size])
         corpus_sizes = np.unique(
-            np.logspace(np.log10(min_size), np.log10(corpus_size), num=60, dtype=int)
+            np.logspace(
+                np.log10(min_size), np.log10(corpus_size), num=60, dtype=int
+            )
         )
         return corpus_sizes
 
@@ -479,71 +526,109 @@ class AdvancedTools(CorpusTools):
         seen: Set[str] = set()
         vocab_sizes = []
         checkpoint_results = {}
-        
+
         for idx, token in enumerate(self.tokens, 1):
             seen.add(token)
             if idx in checkpoints:
                 checkpoint_results[idx] = len(seen)
                 if len(checkpoint_results) == len(checkpoints):
                     break
-        
+
         # Return results in order of corpus_sizes
         for size in corpus_sizes:
             vocab_sizes.append(checkpoint_results.get(int(size), len(seen)))
-        
+
         return vocab_sizes
+
+    _HEAPS_MIN_POINTS = 3  # Minimum sample points needed for a meaningful fit
 
     def calculate_heaps_law(self) -> Optional[Tuple[float, float]]:
         """
-        Estimate parameters for Heaps' Law using weighted non-linear curve fitting.
+        Estimate Heaps' Law parameters V(N) = K * N^beta.
+
+        Uses the Zipf-Heaps theoretical relationship (beta ≈ 1/alpha) to
+        derive an informed initial guess, then fits in log-space
+        (log V = log K + beta * log N) for numerical stability before
+        refining in the original space.
         """
         if self._heaps_params is not None:
             return self._heaps_params
 
         corpus_size = self.total_token_count
-        
+
         # Generate corpus sizes
         corpus_sizes = self.generate_corpus_sizes(corpus_size)
+
+        if len(corpus_sizes) < self._HEAPS_MIN_POINTS:
+            warnings.warn(
+                f"Corpus too small ({corpus_size} tokens) for reliable "
+                f"Heaps' Law fitting (need >= {self._HEAPS_MIN_POINTS} sample points)"
+            )
+            return None
 
         # Calculate vocabulary sizes for each corpus size
         vocab_sizes = self.calculate_vocab_sizes(corpus_sizes)
 
-        # Define weights for curve fitting
-        weights = np.sqrt(corpus_sizes)
+        corpus_arr = np.asarray(corpus_sizes, dtype=float)
+        vocab_arr = np.asarray(vocab_sizes, dtype=float)
+
+        # --- Initial guess from Zipf-Heaps relationship: beta ≈ 1/alpha ---
+        alpha = self.calculate_zipf_alpha()
+        beta_init = min(1.0 / alpha, 0.99) if alpha > 0 else 0.5
+        # Derive K_init from the last data point: K ≈ V_last / N_last^beta
+        K_init = float(vocab_arr[-1] / (corpus_arr[-1] ** beta_init))
+
+        # --- Step 1: log-space OLS for a robust starting point ---
+        log_N = np.log(corpus_arr)
+        log_V = np.log(np.maximum(vocab_arr, 1))
+        # log V = log K + beta * log N  →  OLS
+        A = np.vstack([log_N, np.ones(len(log_N))]).T
+        (beta_ols, logK_ols), _, _, _ = np.linalg.lstsq(A, log_V, rcond=None)
+        K_ols = np.exp(logK_ols)
+
+        # Pick the better of the two initial guesses
+        def _sse(K: float, beta: float) -> float:
+            pred = K * corpus_arr**beta
+            return float(np.sum((vocab_arr - pred) ** 2))
+
+        if _sse(K_ols, beta_ols) < _sse(K_init, beta_init):
+            p0 = [K_ols, beta_ols]
+        else:
+            p0 = [K_init, beta_init]
+
+        # --- Step 2: weighted nonlinear refinement in original space ---
+        weights = np.sqrt(corpus_arr)
 
         try:
-            # Estimate parameters using weighted non-linear curve fitting
             popt, _ = curve_fit(
                 self.heaps_law,
-                corpus_sizes,
-                vocab_sizes,
-                p0=[1, 0.5],
-                sigma=1 / weights
+                corpus_arr,
+                vocab_arr,
+                p0=p0,
+                sigma=1.0 / weights,
             )
-            self._heaps_params = tuple(popt)
+            self._heaps_params = (float(popt[0]), float(popt[1]))
             return self._heaps_params
         except RuntimeError:
+            # If curve_fit fails, fall back to the best initial guess
+            if _sse(*p0) < np.inf:
+                self._heaps_params = (float(p0[0]), float(p0[1]))
+                warnings.warn(
+                    "Heaps' Law curve_fit failed; using log-space estimate"
+                )
+                return self._heaps_params
             warnings.warn("Heaps' Law fitting failed")
             return None
 
     def estimate_vocabulary_size(self, total_tokens: int) -> int:
         """
         Estimate the vocabulary size for a given number of tokens using Heaps' Law.
-        Ensures that the output is an integer, as vocabulary size cannot be fractional.
-        Use to evaluate Heaps' law fit by comparing with actual vocabulary size.
         """
-        if self._heaps_params is None:
-            self._heaps_params = self.calculate_heaps_law()  # Calculate parameters if not already cached
-
-        if self._heaps_params is None:
-            # If we still don't have parameters, return a default or raise an error
+        params = self._heaps_params or self.calculate_heaps_law()
+        if params is None:
             raise ValueError("Heaps' Law parameters could not be calculated.")
-
-        K, beta = self._heaps_params  # Retrieve parameters
-        estimated_vocab_size = K * (total_tokens ** beta)  # Calculate vocabulary size
-
-        # Round the estimated vocabulary size to the nearest integer
-        return int(round(estimated_vocab_size))
+        K, beta = params
+        return int(round(K * total_tokens**beta))
 
     def calculate_zipf_alpha(self) -> float:
         """
@@ -552,10 +637,9 @@ class AdvancedTools(CorpusTools):
         if self._zipf_alpha is not None:
             return self._zipf_alpha
 
-        freqs = np.array([f for _, f in self.frequency.most_common()], float)
-        n = len(freqs)
+        freqs = self._ranked_freqs
         probs = freqs / freqs.sum()
-        log_ranks = np.log(np.arange(1, n + 1, dtype=float))
+        log_ranks = np.log(self._ranks)
 
         def nll(alpha: float) -> float:
             if alpha <= 0:
@@ -566,49 +650,229 @@ class AdvancedTools(CorpusTools):
             # Expected negative log-prob under empirical probs:
             return float(log_Z + alpha * np.sum(probs * log_ranks))
 
-        res = optimize.minimize_scalar(nll, bounds=(1e-3, 5.0), method='bounded')
+        res = optimize.minimize_scalar(
+            nll, bounds=(1e-3, 5.0), method="bounded"
+        )
         if not res.success:
             raise RuntimeError("Failed to estimate Zipf's alpha parameter")
         self._zipf_alpha = float(res.x)
         return self._zipf_alpha
 
-    def calculate_zipf_mandelbrot(self, verbose: bool = False) -> Tuple[float, float]:
+    def calculate_zipf_mandelbrot(
+        self, verbose: bool = False
+    ) -> Tuple[float, float]:
         """
-        Fit the Zipf-Mandelbrot distribution to the corpus and find parameters q and s.
+        Fit the Zipf-Mandelbrot distribution P(r) ∝ 1/(r+q)^s via MLE,
+        seeded from the already-estimated Zipf alpha.
+
+        Uses negative log-likelihood (equivalent to KL-divergence minimisation)
+        instead of L2 on probabilities, which avoids head-dominated bias.
+        A fast local optimiser (L-BFGS-B) is tried first from an informed
+        initial guess; differential_evolution is used as fallback.
         """
         if self._zipf_mandelbrot_params is not None:
             return self._zipf_mandelbrot_params
 
-        freqs = np.array([f for _, f in self.frequency.most_common()], float)
-        ranks = np.arange(1, len(freqs) + 1, dtype=float)
-        p_emp = freqs / freqs.sum()
+        freqs = self._ranked_freqs
+        N_total = freqs.sum()
+        ranks = self._ranks
 
-        def model(k, q, s):
-            w = 1.0 / np.power(k + q, s)
-            return w / w.sum()
+        # --- MLE objective: negative log-likelihood ---
+        # L(q,s) = -sum_r  n_r * log P(r|q,s)
+        #        = s * sum_r n_r * log(r+q) + N * log(Z(q,s))
+        # where Z(q,s) = sum_r 1/(r+q)^s
 
-        def objective(params):
+        def nll(params: np.ndarray) -> float:
             q, s = params
-            if q <= 0 or s <= 0:
+            if q < 0 or s <= 0:
                 return np.inf
-            return float(np.sum((model(ranks, q, s) - p_emp) ** 2))
+            log_rq = np.log(ranks + q)
+            log_w = -s * log_rq
+            # log-sum-exp for numerical stability of log(Z)
+            m = log_w.max()
+            log_Z = m + np.log(np.exp(log_w - m).sum())
+            return float(s * np.dot(freqs, log_rq) + N_total * log_Z)
 
-        bounds = [(0.01, 10.0), (0.5, 2.5)]
-        result = differential_evolution(objective, bounds)
-        if result.success:
-            q, s = result.x
-            self._zipf_mandelbrot_params = (q, s)
-            if verbose:
-                print(f"Fitted parameters: q = {q}, s = {s}")
+        bounds_local = ((1e-4, 20.0), (0.1, 5.0))
+
+        # --- Informed initial guess from Zipf alpha ---
+        alpha = self.calculate_zipf_alpha()
+        q0, s0 = 1.0, alpha  # s ≈ alpha, q ≈ 1 (Mandelbrot's typical range)
+
+        # Try fast local optimisation first
+        local_result = optimize.minimize(
+            nll, x0=[q0, s0], method="L-BFGS-B", bounds=bounds_local
+        )
+
+        if local_result.success:
+            best_q, best_s = local_result.x
+            best_nll = local_result.fun
         else:
-            raise RuntimeError("Failed to estimate Zipf-Mandelbrot parameters")
+            best_q, best_s, best_nll = q0, s0, nll(np.array([q0, s0]))
+
+        # Fallback: global search if local fit looks poor
+        # (compare against pure Zipf NLL as a sanity check)
+        zipf_nll = nll(np.array([0.0, alpha]))
+        if best_nll > zipf_nll:
+            # Local optimiser did worse than pure Zipf — use global search
+            de_result = differential_evolution(
+                nll, bounds=bounds_local, seed=42, tol=1e-10
+            )
+            if de_result.success and de_result.fun < best_nll:
+                best_q, best_s = de_result.x
+
+        self._zipf_mandelbrot_params = (float(best_q), float(best_s))
+        if verbose:
+            print(f"Fitted parameters: q = {best_q:.6f}, s = {best_s:.6f}")
 
         return self._zipf_mandelbrot_params
+
+    # ----------------------- Goodness-of-fit metrics ---------------------- #
+
+    @staticmethod
+    def _r_squared(observed: np.ndarray, predicted: np.ndarray) -> float:
+        """Coefficient of determination (R²)."""
+        ss_res = np.sum((observed - predicted) ** 2)
+        ss_tot = np.sum((observed - observed.mean()) ** 2)
+        return float(1 - ss_res / ss_tot) if ss_tot > 0 else 0.0
+
+    @staticmethod
+    def _ks_statistic(observed: np.ndarray, predicted: np.ndarray) -> float:
+        """Kolmogorov-Smirnov statistic between two distributions (CDF-based)."""
+        obs_cdf = np.cumsum(observed) / np.sum(observed)
+        pred_cdf = np.cumsum(predicted) / np.sum(predicted)
+        return float(np.max(np.abs(obs_cdf - pred_cdf)))
+
+    @staticmethod
+    def _rmse(observed: np.ndarray, predicted: np.ndarray) -> float:
+        """Root mean squared error."""
+        return float(np.sqrt(np.mean((observed - predicted) ** 2)))
+
+    def fit_quality(self) -> Dict[str, Dict[str, float]]:
+        """
+        Evaluate goodness-of-fit for all fitted models.
+        Returns R², KS statistic, RMSE, and the Zipf-Heaps consistency
+        ratio (beta * alpha — should be close to 1.0 if both fits agree
+        with the theoretical relationship beta ≈ 1/alpha).
+
+        Must be called after the individual fit methods.
+        """
+        freqs = self._ranked_freqs
+        ranks = self._ranks
+        results: Dict[str, Dict[str, float]] = {}
+
+        # --- Zipf ---
+        if self._zipf_alpha is not None:
+            alpha = self._zipf_alpha
+            pred = freqs[0] / np.power(ranks, alpha)
+            results["zipf"] = {
+                "alpha": alpha,
+                "R2": self._r_squared(freqs, pred),
+                "KS": self._ks_statistic(freqs, pred),
+                "RMSE": self._rmse(freqs, pred),
+            }
+
+        # --- Zipf-Mandelbrot ---
+        if self._zipf_mandelbrot_params is not None:
+            q, s = self._zipf_mandelbrot_params
+            w = 1.0 / np.power(ranks + q, s)
+            pred_zm = w * (freqs.sum() / w.sum())
+            results["zipf_mandelbrot"] = {
+                "q": q,
+                "s": s,
+                "R2": self._r_squared(freqs, pred_zm),
+                "KS": self._ks_statistic(freqs, pred_zm),
+                "RMSE": self._rmse(freqs, pred_zm),
+            }
+
+        # --- Heaps ---
+        if self._heaps_params is not None:
+            K, beta = self._heaps_params
+            corpus_sizes = self.generate_corpus_sizes(self.total_token_count)
+            vocab_sizes = np.asarray(
+                self.calculate_vocab_sizes(corpus_sizes), dtype=float
+            )
+            pred_heaps = K * np.power(corpus_sizes.astype(float), beta)
+            results["heaps"] = {
+                "K": K,
+                "beta": beta,
+                "R2": self._r_squared(vocab_sizes, pred_heaps),
+                "KS": self._ks_statistic(vocab_sizes, pred_heaps),
+                "RMSE": self._rmse(vocab_sizes, pred_heaps),
+            }
+
+        # --- Cross-consistency: beta * alpha ≈ 1.0 ---
+        if self._zipf_alpha is not None and self._heaps_params is not None:
+            alpha = self._zipf_alpha
+            _, beta = self._heaps_params
+            ratio = beta * alpha
+            results["consistency"] = {
+                "beta_times_alpha": ratio,
+                "deviation_from_1": abs(ratio - 1.0),
+            }
+
+        return results
+
+    # -------------------- Zipf x_min estimation (CSN) --------------------- #
+
+    def estimate_zipf_xmin(self) -> Dict[str, Any]:
+        """
+        Estimate the lower bound (x_min) of the power-law regime using the
+        Clauset-Shalizi-Newman KS-minimisation method on frequencies.
+
+        Returns a dict with x_min, alpha (re-estimated above x_min),
+        KS statistic, and the number of words in the power-law tail.
+        """
+        # _ranked_freqs is already descending; we need it for tail slicing
+        freqs_desc = self._ranked_freqs
+        unique_freqs = np.unique(freqs_desc)
+
+        best_ks = np.inf
+        best_xmin = int(unique_freqs[0])
+        best_alpha = 1.0
+
+        for xmin_candidate in unique_freqs:
+            tail = freqs_desc[freqs_desc >= xmin_candidate]
+            if len(tail) < 10:
+                continue
+
+            # Continuous MLE approximation for discrete power law (Hill estimator)
+            # alpha_hat = 1 + n / sum(ln(x_i / (x_min - 0.5)))
+            denom = np.sum(np.log(tail / (xmin_candidate - 0.5)))
+            if denom <= 0:
+                continue
+            n = len(tail)
+            alpha_hat = 1.0 + n / denom
+
+            # Theoretical CDF: P(X >= x) = (x / x_min)^(-alpha+1)
+            # Empirical CDF from the tail
+            tail_sorted = np.sort(tail)
+            ecdf = np.arange(1, n + 1) / n
+            tcdf = 1.0 - np.power(tail_sorted / xmin_candidate, -alpha_hat + 1)
+            tcdf = np.clip(tcdf, 0, 1)
+            ks = float(np.max(np.abs(ecdf - tcdf)))
+
+            if ks < best_ks:
+                best_ks = ks
+                best_xmin = int(xmin_candidate)
+                best_alpha = float(alpha_hat)
+
+        return {
+            "x_min": best_xmin,
+            "alpha": best_alpha,
+            "KS": best_ks,
+            "n_tail": int(np.sum(freqs_desc >= best_xmin)),
+            "n_total": len(freqs_desc),
+            "tail_fraction": float(
+                np.sum(freqs_desc >= best_xmin) / len(freqs_desc)
+            ),
+        }
 
 
 ##########################################################################
 #                          EntropyCalculator
 ##########################################################################
+
 
 class EntropyCalculator(CorpusTools):
     """
@@ -626,21 +890,26 @@ class EntropyCalculator(CorpusTools):
             raise ValueError("q_grams must be between 1 and 12")
 
         # Keep original cleaning: letters-only, lowercased, characters space-separated
-        cleaned_tokens = [
-            " ".join(reg.sub(r"[^a-zA-Z]", "", token).lower())
-            for token in tokens
-            if len(token) >= 2
-        ]
+        # Filter on the cleaned result (not the original) to avoid empty strings
+        cleaned_tokens = []
+        for token in tokens:
+            alpha_only = reg.sub(r"[^a-zA-Z]", "", token).lower()
+            if len(alpha_only) >= 2:
+                cleaned_tokens.append(" ".join(alpha_only))
         if not cleaned_tokens:
-            raise ValueError("No valid tokens after cleaning for entropy calculation")
+            raise ValueError(
+                "No valid tokens after cleaning for entropy calculation"
+            )
 
         super().__init__(cleaned_tokens)
         self.q_grams = q_grams
 
         # Precompute common concatenations to avoid recomputing on every call
         self._chars_no_space: str = "".join(self.tokens).replace(" ", "")
-        self._char_stream: str = " ".join(self.tokens)   # 't h e c a t ...'
-        self._train_text: str = "\n".join(self.tokens)   # per-word sentence: ensures </s>
+        self._char_stream: str = " ".join(self.tokens)  # 't h e c a t ...'
+        self._train_text: str = "\n".join(
+            self.tokens
+        )  # per-word sentence: ensures </s>
 
     # --------------------------- H0 / H1 / H2 ---------------------------- #
     def calculate_H0(self) -> float:
@@ -725,15 +994,22 @@ class EntropyCalculator(CorpusTools):
         - Ln→bits conversion preserved: score(...) / log(2).
         - Denominator preserved: (#tokens - q + 1).
         """
+        if kenlm is None:
+            raise ImportError(
+                "KenLM is required for H3 calculation. "
+                "Install it with: pip install kenlm"
+            )
         model_path, tmp = self.train_kenlm_model(self._train_text)
         try:
             model = kenlm.Model(str(model_path))
 
             # KenLM .score returns ln(prob); convert to bits
-            log_prob_bits = model.score(self._char_stream, bos=False, eos=False) / math.log(2)
+            log_prob_bits = model.score(
+                self._char_stream, bos=False, eos=False
+            ) / math.log(2)
 
-            T = len(self._char_stream.split())                 # number of character tokens
-            denom = max(1, T - self.q_grams + 1)               # character n-grams
+            T = len(self._char_stream.split())  # number of character tokens
+            denom = max(1, T - self.q_grams + 1)  # character n-grams
             return float(-log_prob_bits / denom)
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
@@ -748,6 +1024,7 @@ class EntropyCalculator(CorpusTools):
 ##########################################################################
 #                              CorpusPlots
 ##########################################################################
+
 
 class CorpusPlots:
     """
@@ -784,7 +1061,9 @@ class CorpusPlots:
         self._ranks = np.arange(1, len(items) + 1, dtype=float)
         self._freqs = np.array([f for _, f in items], dtype=float)
         self._freqs_norm_max = (
-            self._freqs / self._freqs.max() if self._freqs.size else self._freqs
+            self._freqs / self._freqs.max()
+            if self._freqs.size
+            else self._freqs
         )
 
     # ----------------------------- helpers ------------------------------ #
@@ -810,7 +1089,9 @@ class CorpusPlots:
         return out
 
     @staticmethod
-    def _downsample(x: np.ndarray, y: np.ndarray, *, top_n: Optional[int], stride: int):
+    def _downsample(
+        x: np.ndarray, y: np.ndarray, *, top_n: Optional[int], stride: int
+    ):
         """Optional point thinning for faster scatter; math unchanged."""
         if top_n is not None and top_n > 0:
             x, y = x[:top_n], y[:top_n]
@@ -828,21 +1109,42 @@ class CorpusPlots:
     ) -> Path:
         alpha = self.analyzer.calculate_zipf_alpha()
         if alpha is None:
-            raise ValueError("Alpha calculation failed, cannot plot Zipf's Law fit.")
+            raise ValueError(
+                "Alpha calculation failed, cannot plot Zipf's Law fit."
+            )
 
         ranks = self._ranks
         y_emp = self._freqs_norm_max
-        y_fit = (1.0 / np.power(ranks, alpha)) / (1.0 / np.power(ranks[0], alpha))
+        y_fit = (1.0 / np.power(ranks, alpha)) / (
+            1.0 / np.power(ranks[0], alpha)
+        )
 
         x_sc, y_sc = self._downsample(ranks, y_emp, top_n=top_n, stride=stride)
 
-        fig, ax = self._new_axes("Zipf's Law Fit", "Rank", "Normalized Frequency", figsize)
-        ax.set_xscale("log"); ax.set_yscale("log")
+        fig, ax = self._new_axes(
+            "Zipf's Law Fit", "Rank", "Normalized Frequency", figsize
+        )
+        ax.set_xscale("log")
+        ax.set_yscale("log")
 
         # Distinct colors: blue points, red fit
-        ax.plot(x_sc, y_sc, linestyle="none", marker="o", color="tab:blue",
-                markersize=3, alpha=0.5, label="Empirical")
-        ax.plot(ranks, y_fit, color="tab:red", linewidth=2, label=f"Zipf Fit (α={alpha:.3f})")
+        ax.plot(
+            x_sc,
+            y_sc,
+            linestyle="none",
+            marker="o",
+            color="tab:blue",
+            markersize=3,
+            alpha=0.5,
+            label="Empirical",
+        )
+        ax.plot(
+            ranks,
+            y_fit,
+            color="tab:red",
+            linewidth=2,
+            label=f"Zipf Fit (α={alpha:.3f})",
+        )
 
         ax.legend()
         return self._save(fig, "zipfs_law_fit")
@@ -867,14 +1169,30 @@ class CorpusPlots:
 
         x_sc, y_sc = self._downsample(ranks, y_emp, top_n=top_n, stride=stride)
 
-        fig, ax = self._new_axes("Zipf–Mandelbrot Fit", "Rank", "Normalized Frequency", figsize)
-        ax.set_xscale("log"); ax.set_yscale("log")
+        fig, ax = self._new_axes(
+            "Zipf–Mandelbrot Fit", "Rank", "Normalized Frequency", figsize
+        )
+        ax.set_xscale("log")
+        ax.set_yscale("log")
 
         # Distinct colors: navy points, red fit
-        ax.plot(x_sc, y_sc, linestyle="none", marker="o", color="navy",
-                markersize=3, alpha=0.5, label="Empirical")
-        ax.plot(ranks, y_fit, color="tab:red", linewidth=2,
-                label=f"ZM Fit (q={q:.3f}, s={s:.3f})")
+        ax.plot(
+            x_sc,
+            y_sc,
+            linestyle="none",
+            marker="o",
+            color="navy",
+            markersize=3,
+            alpha=0.5,
+            label="Empirical",
+        )
+        ax.plot(
+            ranks,
+            y_fit,
+            color="tab:red",
+            linewidth=2,
+            label=f"ZM Fit (q={q:.3f}, s={s:.3f})",
+        )
 
         ax.legend()
         return self._save(fig, "zipf_mandelbrot_fit")
@@ -897,11 +1215,21 @@ class CorpusPlots:
         corpus_sizes = self.analyzer.generate_corpus_sizes(corpus_size)
         vocab_sizes = self.analyzer.calculate_vocab_sizes(corpus_sizes)
 
-        fig, ax = self._new_axes("Heaps' Law Analysis", "Token Count", "Type Count", figsize)
+        fig, ax = self._new_axes(
+            "Heaps' Law Analysis", "Token Count", "Type Count", figsize
+        )
 
         # Distinct colors: blue empirical, red dashed fit; linear axes
-        ax.plot(corpus_sizes, vocab_sizes, color="tab:blue",
-                marker="o", markersize=3, linewidth=1.5, alpha=0.7, label="Empirical")
+        ax.plot(
+            corpus_sizes,
+            vocab_sizes,
+            color="tab:blue",
+            marker="o",
+            markersize=3,
+            linewidth=1.5,
+            alpha=0.7,
+            label="Empirical",
+        )
         ax.plot(
             corpus_sizes,
             K * np.power(corpus_sizes, beta),
