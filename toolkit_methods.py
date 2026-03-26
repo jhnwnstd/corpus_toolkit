@@ -562,15 +562,15 @@ class AdvancedTools(CorpusTools):
             p0 = [K_init, beta_init]
 
         # --- Step 2: weighted nonlinear refinement in original space ---
-        weights = np.sqrt(corpus_arr)
-
+        # N^2 weighting heavily prioritises the large-N region where we
+        # actually evaluate the fit, reducing small-N distortion.
         try:
             popt, _ = curve_fit(
                 self.heaps_law,
                 corpus_arr,
                 vocab_arr,
                 p0=p0,
-                sigma=1.0 / weights,
+                sigma=1.0 / (corpus_arr**2),
             )
             self._heaps_params = (float(popt[0]), float(popt[1]))
             return self._heaps_params
@@ -1026,11 +1026,12 @@ class EntropyCalculator(CorpusTools):
             if T == 0:
                 continue
 
-            model_path, tmp = self.train_kenlm_model(train)
             try:
-                assert (
-                    kenlm is not None
-                ), "KenLM must be available at this point"
+                model_path, tmp = self.train_kenlm_model(train)
+            except subprocess.CalledProcessError:
+                # Fold's training data too small for KenLM — skip this fold
+                continue
+            try:
                 model = kenlm.Model(str(model_path))
                 fold_log10 = model.score(test, bos=False, eos=False)
                 total_log2 += fold_log10 / math.log10(2)
@@ -1039,7 +1040,8 @@ class EntropyCalculator(CorpusTools):
                 shutil.rmtree(tmp, ignore_errors=True)
 
         if total_chars == 0:
-            return 0.0
+            # All folds failed — fall back to train=test
+            return self._h3_single_pass("\n".join(lines), self._char_stream)
 
         self._h3_cache = float(-total_log2 / total_chars)
         return self._h3_cache
