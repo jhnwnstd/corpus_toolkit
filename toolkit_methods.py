@@ -879,10 +879,11 @@ class EntropyCalculator(CorpusTools):
     """
     Entropy metrics (H0–H3) with KenLM-backed H3 at character level.
     - Cleaning: letters only, lowercased; each original token becomes a sequence of
-      space-separated characters (e.g., 'the' -> 't h e'). This mirrors your original code.
-    - H0 excludes spaces from the alphabet (unchanged).
-    - H1/H2 computed over characters (no spaces).
-    - H3 uses KenLM; ln→bits conversion matches your “correct” runs.
+      space-separated characters (e.g., 'the' -> 't h e').
+    - H0 excludes spaces from the alphabet.
+    - H1 includes Miller-Madow bias correction: H + (m-1)/(2*N*ln2).
+    - H2 uses unbiased collision probability: sum(n_i*(n_i-1))/(N*(N-1)).
+    - H3 uses KenLM n-gram model; score is log10, converted to bits via /log10(2).
     """
 
     # ------------------------------- Init -------------------------------- #
@@ -905,38 +906,69 @@ class EntropyCalculator(CorpusTools):
         super().__init__(cleaned_tokens)
         self.q_grams = q_grams
 
-        # Precompute common concatenations to avoid recomputing on every call
+        # Pre-compute character data once (used by H0, H1, H2)
         self._chars_no_space: str = "".join(self.tokens).replace(" ", "")
-        self._char_stream: str = " ".join(self.tokens)  # 't h e c a t ...'
-        self._train_text: str = "\n".join(
-            self.tokens
-        )  # per-word sentence: ensures </s>
+        self._char_counts: Counter = Counter(self._chars_no_space)
+        self._char_total: int = len(self._chars_no_space)
+
+        # Character stream for KenLM evaluation: 't h e c a t ...'
+        self._char_stream: str = " ".join(self.tokens)
+
+        # Training text: group tokens into ~1000-char chunks so KenLM
+        # sees cross-word context (not one-word-per-line which wastes
+        # n-gram capacity on sentence boundaries).
+        lines: List[str] = []
+        current: List[str] = []
+        length = 0
+        for tok in self.tokens:
+            current.append(tok)
+            length += len(tok.split()) + 1
+            if length >= 1000:
+                lines.append(" ".join(current))
+                current = []
+                length = 0
+        if current:
+            lines.append(" ".join(current))
+        self._train_text: str = "\n".join(lines)
+
+        self._h3_cache: Optional[float] = None
 
     # --------------------------- H0 / H1 / H2 ---------------------------- #
     def calculate_H0(self) -> float:
         """Zeroth-order entropy over the observed alphabet (spaces excluded)."""
-        if not self._chars_no_space:
+        if not self._char_counts:
             return 0.0
-        return math.log2(len(set(self._chars_no_space)))
+        return math.log2(len(self._char_counts))
 
     def calculate_H1(self) -> float:
-        """Shannon entropy (bits/char) over characters (spaces excluded)."""
-        text = self._chars_no_space
-        if not text:
+        """
+        Shannon entropy (bits/char) with Miller-Madow bias correction.
+        H_MM = H_plugin + (m - 1) / (2 * N * ln(2))
+        """
+        N = self._char_total
+        if N == 0:
             return 0.0
-        counts = Counter(text)
-        N = len(text)
-        return -sum((c / N) * math.log2(c / N) for c in counts.values())
+        m = len(self._char_counts)
+        H_plugin = -sum(
+            (c / N) * math.log2(c / N) for c in self._char_counts.values()
+        )
+        correction = (m - 1) / (2 * N * math.log(2))
+        return H_plugin + correction
 
     def calculate_H2(self) -> float:
-        """Rényi entropy of order 2 (collision entropy) over characters (spaces excluded)."""
-        text = self._chars_no_space
-        if not text:
+        """
+        Rényi entropy of order 2 using unbiased collision probability
+        estimator: sum(n_i*(n_i-1)) / (N*(N-1)).
+        """
+        N = self._char_total
+        if N <= 1:
             return 0.0
-        counts = Counter(text)
-        N = len(text)
-        p = np.fromiter((c / N for c in counts.values()), dtype=float)
-        return float(-np.log2(np.sum(p * p)))
+        collision_prob = sum(
+            c * (c - 1) for c in self._char_counts.values()
+        ) / (N * (N - 1))
+        if collision_prob <= 0:
+            return 0.0
+        return float(-math.log2(collision_prob))
 
     # ------------------------------ KenLM -------------------------------- #
     @staticmethod
@@ -989,12 +1021,15 @@ class EntropyCalculator(CorpusTools):
 
     def calculate_H3_kenlm(self) -> float:
         """
-        Character-level H3 (bits per character n-gram) using KenLM.
-        - Train: one sentence per original word (ensures </s>).
-        - Eval:  one continuous stream of character tokens.
-        - Ln→bits conversion preserved: score(...) / log(2).
-        - Denominator preserved: (#tokens - q + 1).
+        Character-level cross-entropy (bits/char) using a KenLM n-gram model.
+
+        Trained on continuous text chunks so the model learns cross-word
+        character dependencies. KenLM .score() returns log10(P); converted
+        to bits via / log10(2). Normalized by total character tokens T.
         """
+        if self._h3_cache is not None:
+            return self._h3_cache
+
         if kenlm is None:
             raise ImportError(
                 "KenLM is required for H3 calculation. "
@@ -1004,21 +1039,21 @@ class EntropyCalculator(CorpusTools):
         try:
             model = kenlm.Model(str(model_path))
 
-            # KenLM .score returns ln(prob); convert to bits
-            log_prob_bits = model.score(
-                self._char_stream, bos=False, eos=False
-            ) / math.log(2)
+            # KenLM .score() returns total log10(P)
+            total_log10 = model.score(self._char_stream, bos=False, eos=False)
+            # Convert log10 → log2 (bits)
+            total_log2 = total_log10 / math.log10(2)
 
             T = len(self._char_stream.split())  # number of character tokens
-            denom = max(1, T - self.q_grams + 1)  # character n-grams
-            return float(-log_prob_bits / denom)
+            self._h3_cache = float(-total_log2 / max(1, T))
+            return self._h3_cache
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
     # ---------------------------- Redundancy ----------------------------- #
     @staticmethod
     def calculate_redundancy(H3: float, H0: float) -> float:
-        """Redundancy (%) relative to alphabet capacity (unchanged)."""
+        """Redundancy (%) relative to alphabet capacity: R = (1 - H3/H0) * 100."""
         return (1 - H3 / H0) * 100 if H0 > 0 else 0.0
 
 
