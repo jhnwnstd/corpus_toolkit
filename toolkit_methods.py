@@ -5,7 +5,6 @@ import shutil
 import string
 import subprocess
 import tempfile
-import threading
 import warnings
 from collections import Counter
 from pathlib import Path
@@ -31,9 +30,7 @@ except ImportError:  # pragma: no cover
 
 
 class CorpusLoader:
-    """
-    Load a corpus from NLTK or a local file/directory, optimized for performance.
-    """
+    """Load a corpus from NLTK or a local file/directory with caching."""
 
     def __init__(
         self,
@@ -41,87 +38,62 @@ class CorpusLoader:
         allow_download: bool = True,
         custom_download_dir: Optional[str] = None,
     ):
-        # Source of the corpus (either a local path or an NLTK corpus name)
         self.corpus_source = corpus_source
-        # Flag to allow automatic download from NLTK if the corpus isn't available locally
         self.allow_download = allow_download
-        # Custom directory for downloading corpora (if needed)
         self.custom_download_dir = custom_download_dir
-        # Cache for loaded corpus to avoid reloading
         self.corpus_cache: Optional[List[str]] = None
 
     def _download_corpus(self) -> None:
         """Download the corpus from NLTK."""
-        # Append custom download directory to NLTK's data path if provided
         if (
             self.custom_download_dir
             and self.custom_download_dir not in nltk.data.path
         ):
             nltk.data.path.append(self.custom_download_dir)
-        # Download corpus using NLTK's download utility
         nltk.download(
             self.corpus_source,
             download_dir=self.custom_download_dir,
             quiet=True,
         )
 
-    def _load_corpus_from_path(self, path: Path) -> List[str]:
-        """Load the corpus from a local file or directory."""
-        # Use PlaintextCorpusReader to read tokens from the local path
-        corpus_reader = PlaintextCorpusReader(str(path), ".*")
-        # Return all tokens from the corpus
-        return [
-            str(token)
-            for fileid in corpus_reader.fileids()
-            for token in corpus_reader.words(fileid)
-        ]
-
-    def _load_corpus_from_nltk(self) -> List[str]:
-        """Load corpus from NLTK with clear error handling."""
-        try:
-            corpus_reader = getattr(nltk.corpus, self.corpus_source)
-        except AttributeError as e:
-            raise LookupError(
-                f"NLTK corpus '{self.corpus_source}' not found. "
-                f"Try allow_download=True or supply a local path."
-            ) from e
-        return [
-            token
-            for fileid in corpus_reader.fileids()
-            for token in corpus_reader.words(fileid)
-        ]
-
     def _load_corpus(self) -> List[str]:
-        """Load the corpus into memory."""
+        """Load the corpus into memory from local path or NLTK."""
         path = Path(self.corpus_source)
         if path.is_file() or path.is_dir():
-            return self._load_corpus_from_path(path)
+            reader = PlaintextCorpusReader(str(path), ".*")
         else:
-            return self._load_corpus_from_nltk()
+            try:
+                reader = getattr(nltk.corpus, self.corpus_source)
+            except AttributeError as e:
+                raise LookupError(
+                    f"NLTK corpus '{self.corpus_source}' not found. "
+                    f"Try allow_download=True or supply a local path."
+                ) from e
+        return [
+            str(token)
+            for fileid in reader.fileids()
+            for token in reader.words(fileid)
+        ]
 
     def load_corpus(self) -> List[str]:
         """Get the corpus, either from cache or by loading it."""
-        # Return cached corpus if available
         if self.corpus_cache is not None:
             return self.corpus_cache
 
-        # Download corpus if not locally available and downloading is allowed
         if not self.is_corpus_available() and self.allow_download:
             self._download_corpus()
 
-        # Load corpus into cache and return
         self.corpus_cache = self._load_corpus()
         return self.corpus_cache
 
     def is_corpus_available(self) -> bool:
-        """Robust availability check for local paths and NLTK corpora."""
+        """Check if the corpus is accessible locally or via NLTK."""
         path = Path(self.corpus_source)
         if path.exists():
             return True
         try:
-            # Probe actual corpus accessor for more reliable detection
             corpus = getattr(nltk.corpus, self.corpus_source)
-            _ = corpus.fileids()  # Test access
+            corpus.fileids()
             return True
         except (AttributeError, LookupError):
             return False
@@ -133,11 +105,8 @@ class CorpusLoader:
 
 
 class Tokenizer:
-    """
-    High-performance tokenizer with caching and robust defaults.
-    """
+    """Tokenizer with optional stopword/punctuation removal and caching."""
 
-    # Class-level cache for stopwords to avoid repeated downloads
     _STOP_CACHE: Dict[Tuple[str, bool, bool], Set[str]] = {}
 
     def __init__(
@@ -152,101 +121,71 @@ class Tokenizer:
         self.use_nltk_tokenizer = use_nltk_tokenizer
         self.stopwords_language = stopwords_language
         self.custom_regex = None
-        self._unwanted_tokens: Set[str] = set()
-        self._initialized = False
-        self._init_lock = threading.Lock()
 
-    def _initialize(self) -> None:
-        """Initialize the tokenizer by ensuring NLTK resources are available and loading unwanted tokens."""
-        with self._init_lock:
-            if not self._initialized:
-                self._ensure_nltk_resources()
-                self._load_unwanted_tokens()
-                self._initialized = True
-
-    def _ensure_nltk_resources(self) -> None:
-        """Ensure that NLTK resources are available."""
-        if self.remove_stopwords:
+        # Download NLTK resources eagerly
+        if remove_stopwords:
             nltk.download("stopwords", quiet=True)
-        if self.use_nltk_tokenizer:
+        if use_nltk_tokenizer:
             nltk.download("punkt", quiet=True)
 
-    def _load_unwanted_tokens(self) -> None:
-        """Load unwanted tokens with caching for performance."""
+        # Build unwanted-token set (cached across instances)
+        self._unwanted_tokens = self._build_unwanted_set()
+
+    def _build_unwanted_set(self) -> Set[str]:
+        """Build the set of tokens to filter out, with class-level caching."""
         cache_key = (
             self.stopwords_language,
             self.remove_stopwords,
             self.remove_punctuation,
         )
         cached = self._STOP_CACHE.get(cache_key)
-
         if cached is not None:
-            self._unwanted_tokens = set(cached)
-            return
+            return set(cached)
 
-        unwanted = set()
+        unwanted: Set[str] = set()
         if self.remove_stopwords:
             unwanted.update(stopwords.words(self.stopwords_language))
         if self.remove_punctuation:
             unwanted.update(string.punctuation)
 
         self._STOP_CACHE[cache_key] = set(unwanted)
-        self._unwanted_tokens = unwanted
+        return unwanted
 
     def set_custom_regex(self, pattern: str) -> None:
         """Set a custom regex pattern for tokenization."""
-        # Compile regex pattern for custom tokenization
         try:
             self.custom_regex = reg.compile(pattern)
         except reg.error as e:
             raise ValueError(f"Invalid regex pattern: {e}")
 
-    def _remove_unwanted_tokens(self, tokens: List[str]) -> List[str]:
-        """Remove unwanted tokens (stopwords, punctuation) from a list of tokens."""
-        # Filter out tokens present in the unwanted tokens set
+    def _filter(self, tokens: List[str]) -> List[str]:
+        """Remove unwanted tokens (stopwords, punctuation, NLTK backtick quotes)."""
+        unwanted = self._unwanted_tokens
         return [
-            token
-            for token in tokens
-            if token not in self._unwanted_tokens
-            and not token.startswith("``")
+            t for t in tokens if t not in unwanted and not t.startswith("``")
         ]
 
     def tokenize(
         self, text: Union[str, List[str]], lowercase: bool = False
     ) -> List[str]:
-        """
-        Tokenize text into individual words based on the selected method.
-
-        Args:
-            text (str or list): The input text to tokenize.
-            lowercase (bool): Whether to convert the text to lowercase before tokenization.
-
-        Returns:
-            list: A list of tokenized words.
-        """
+        """Tokenize text into words. Accepts a string or a pre-split token list."""
         if isinstance(text, list):
-            # If input is a list, join it into a single string
-            text = " ".join(text)
+            # List input (e.g. from CorpusLoader): skip the join→retokenize
+            # round-trip — just lowercase and filter directly.
+            tokens = [t.lower() for t in text] if lowercase else list(text)
+            return self._filter(tokens)
 
         if lowercase:
-            # Convert text to lowercase if specified
             text = text.lower()
 
-        self._initialize()  # Ensure resources are loaded and unwanted tokens are set
-
-        # Perform tokenization based on the selected method
         if self.custom_regex:
-            # Tokenization using the custom regex pattern
             tokens = self.custom_regex.findall(text)
         elif self.use_nltk_tokenizer:
-            # Tokenization using NLTK's word tokenizer
             tokens = word_tokenize(text)
         else:
-            # Basic whitespace tokenization
             tokens = text.split()
 
-        # Remove unwanted tokens from the result
-        return self._remove_unwanted_tokens(tokens)
+        return self._filter(tokens)
 
 
 ##########################################################################
@@ -273,28 +212,27 @@ class CorpusTools:
         if not all(isinstance(token, str) for token in tokens):
             raise ValueError("All tokens must be strings.")
 
-        # Shuffle the tokens if required
         if shuffle_tokens:
             tokens = tokens.copy()
             np.random.shuffle(tokens)
 
-        # Store tokens as a class attribute for later use
-        self.tokens = tokens  # Define self.tokens as an attribute
+        self.tokens = tokens
+        self.frequency = Counter(self.tokens)
+        self._total_token_count = len(self.tokens)
 
-        # Calculate frequency distribution
-        self.frequency = Counter(
-            self.tokens
-        )  # Use self.tokens for consistency
-        self._total_token_count = sum(self.frequency.values())
-
-        # Generate token details for querying
+        # Dense ranking: equal frequency = equal rank.
         self.token_details: Dict[str, Dict[str, Any]] = {}
-        # Rank-indexed list for O(1) rank lookups (index 0 = rank 1)
-        ranked = self.frequency.most_common()
         self._rank_to_token: List[Tuple[str, int]] = []
-        for rank, (token, freq) in enumerate(ranked, 1):
+        ranked = self.frequency.most_common()
+        rank = 0
+        prev_freq = -1
+        for token, freq in ranked:
+            if freq != prev_freq:
+                rank += 1
+                prev_freq = freq
             self.token_details[token] = {"frequency": freq, "rank": rank}
             self._rank_to_token.append((token, freq))
+        self._max_dense_rank = rank
 
     @property
     def total_token_count(self) -> int:
@@ -304,18 +242,11 @@ class CorpusTools:
         return self._total_token_count
 
     def find_median_token(self) -> Dict[str, Union[str, int]]:
-        """
-        Find the median token based on frequency.
-        The median token is the token in the middle of the sorted frequency distribution.
-
-        :return: Dictionary with the median token and its frequency.
-        """
+        """Find the token at the median of the cumulative frequency distribution."""
         median_index = self._total_token_count / 2
         cumulative = 0
-        # Iterate over tokens in order of decreasing frequency
-        for token, freq in self.frequency.most_common():
+        for token, freq in self._rank_to_token:
             cumulative += freq
-            # Return the token once the cumulative count crosses the median index
             if cumulative >= median_index:
                 return {"token": token, "frequency": freq}
         return {}
@@ -331,32 +262,37 @@ class CorpusTools:
     def query_by_token(self, token: str) -> Dict[str, Union[str, int]]:
         """
         Retrieve frequency and rank details for a specific token.
+        The query is case-sensitive — it must match the corpus exactly.
 
-        :param token: Token to query.
-        :return: Dictionary with token details (frequency and rank).
         :raises ValueError: If the token is not found in the corpus.
         """
-        token = token.lower()
         details = self.token_details.get(token)
         if details:
             return {"token": token, **details}
-        else:
-            raise ValueError(f"Token '{token}' not found in the corpus.")
+        raise ValueError(f"Token '{token}' not found in the corpus.")
 
-    def query_by_rank(self, rank: int) -> Dict[str, Union[str, int]]:
+    def query_by_rank(
+        self, rank: int
+    ) -> Union[Dict[str, Union[str, int]], List[Dict[str, Union[str, int]]]]:
         """
-        Retrieve token details for a specific rank in the frequency distribution.
+        Retrieve token(s) at a given dense rank.
 
-        :param rank: Rank to query.
-        :return: Dictionary with token details for the given rank.
-        :raises ValueError: If the rank is out of range.
+        With dense ranking, multiple tokens may share the same rank when they
+        have equal frequency. Returns a single dict if one token matches,
+        or a list of dicts if several tokens are tied at that rank.
+
+        :raises ValueError: If the rank does not exist.
         """
-        if rank < 1 or rank > len(self._rank_to_token):
+        if rank < 1 or rank > self._max_dense_rank:
             raise ValueError(
-                f"Rank {rank} is out of range. Valid ranks are from 1 to {len(self._rank_to_token)}."
+                f"Rank {rank} is out of range. Valid ranks are from 1 to {self._max_dense_rank}."
             )
-        token, freq = self._rank_to_token[rank - 1]
-        return {"token": token, "rank": rank, "frequency": freq}
+        matches = [
+            {"token": t, "rank": d["rank"], "frequency": d["frequency"]}
+            for t, d in self.token_details.items()
+            if d["rank"] == rank
+        ]
+        return matches[0] if len(matches) == 1 else matches
 
     def cumulative_frequency_analysis(
         self, lower_percent=0, upper_percent=100
@@ -382,9 +318,8 @@ class CorpusTools:
         lower = self._total_token_count * (lower_percent / 100.0)
         upper = self._total_token_count * (upper_percent / 100.0)
 
-        # Extract tokens within the specified cumulative frequency range
         out, cum = [], 0
-        for token, freq in self.frequency.most_common():
+        for token, freq in self._rank_to_token:
             cum += freq
             if lower <= cum <= upper:
                 out.append({"token": token, **self.token_details[token]})
@@ -396,23 +331,21 @@ class CorpusTools:
         self, start_rank: int, end_rank: int
     ) -> List[Dict[str, Any]]:
         """
-        List tokens within a specific rank range.
-        Useful for examining the most/least frequent subsets of tokens.
+        List tokens whose dense rank falls within [start_rank, end_rank].
 
-        :param start_rank: Starting rank of the range.
-        :param end_rank: Ending rank of the range.
-        :return: List of dictionaries with token details within the specified rank range.
+        :param start_rank: Starting rank (inclusive).
+        :param end_rank: Ending rank (inclusive).
+        :return: List of token dicts, ordered by frequency descending.
         :raises ValueError: If the rank range is out of valid bounds.
         """
-        if not (1 <= start_rank <= end_rank <= len(self._rank_to_token)):
+        if not (1 <= start_rank <= end_rank <= self._max_dense_rank):
             raise ValueError(
-                f"Rank range is out of valid bounds. Valid ranks are from 1 to {len(self._rank_to_token)}."
+                f"Rank range is out of valid bounds. Valid ranks are from 1 to {self._max_dense_rank}."
             )
         return [
-            {"token": token, "frequency": freq, "rank": rank}
-            for rank, (token, freq) in enumerate(
-                self._rank_to_token[start_rank - 1 : end_rank], start_rank
-            )
+            {"token": t, "frequency": d["frequency"], "rank": d["rank"]}
+            for t, d in self.token_details.items()
+            if start_rank <= d["rank"] <= end_rank
         ]
 
     def x_legomena(self, x: int) -> Set[str]:
@@ -520,25 +453,57 @@ class AdvancedTools(CorpusTools):
         )
         return corpus_sizes
 
-    def calculate_vocab_sizes(self, corpus_sizes: np.ndarray) -> List[int]:
-        """Single pass vocabulary size calculation with checkpoints."""
-        checkpoints = set(int(s) for s in corpus_sizes)
-        seen: Set[str] = set()
-        vocab_sizes = []
-        checkpoint_results = {}
+    _HEAPS_SHUFFLES = 5  # Number of random permutations to average over
 
-        for idx, token in enumerate(self.tokens, 1):
+    def _vocab_sizes_single_pass(
+        self, tokens: List[str], checkpoints: Set[int]
+    ) -> Dict[int, int]:
+        """Single pass vocabulary size calculation with checkpoints."""
+        seen: Set[str] = set()
+        results: Dict[int, int] = {}
+        for idx, token in enumerate(tokens, 1):
             seen.add(token)
             if idx in checkpoints:
-                checkpoint_results[idx] = len(seen)
-                if len(checkpoint_results) == len(checkpoints):
+                results[idx] = len(seen)
+                if len(results) == len(checkpoints):
                     break
+        # Fill any checkpoints beyond token count with final vocab size
+        final = len(seen)
+        for cp in checkpoints:
+            if cp not in results:
+                results[cp] = final
+        return results
 
-        # Return results in order of corpus_sizes
-        for size in corpus_sizes:
-            vocab_sizes.append(checkpoint_results.get(int(size), len(seen)))
+    def calculate_vocab_sizes(self, corpus_sizes: np.ndarray) -> List[int]:
+        """
+        Expected vocabulary sizes at each checkpoint, averaged over multiple
+        random permutations to remove document-ordering artifacts.
 
-        return vocab_sizes
+        Heaps' Law describes a statistical property (expected V(n) under
+        random sampling). A single corpus ordering is one realization that
+        depends on topic clustering. Averaging over shuffles approximates
+        the expectation.
+        """
+        checkpoints = set(int(s) for s in corpus_sizes)
+
+        # First pass: original ordering
+        accum = self._vocab_sizes_single_pass(self.tokens, checkpoints)
+        totals = {cp: float(v) for cp, v in accum.items()}
+
+        # Additional passes: shuffled orderings
+        rng = np.random.RandomState(42)
+        for _ in range(self._HEAPS_SHUFFLES - 1):
+            shuffled = self.tokens.copy()
+            rng.shuffle(shuffled)
+            result = self._vocab_sizes_single_pass(shuffled, checkpoints)
+            for cp, v in result.items():
+                totals[cp] += v
+
+        # Average and return in corpus_sizes order
+        return [
+            int(round(totals[int(s)] / self._HEAPS_SHUFFLES))
+            for s in corpus_sizes
+        ]
 
     _HEAPS_MIN_POINTS = 3  # Minimum sample points needed for a meaningful fit
 
@@ -914,22 +879,20 @@ class EntropyCalculator(CorpusTools):
         # Character stream for KenLM evaluation: 't h e c a t ...'
         self._char_stream: str = " ".join(self.tokens)
 
-        # Training text: group tokens into ~1000-char chunks so KenLM
-        # sees cross-word context (not one-word-per-line which wastes
-        # n-gram capacity on sentence boundaries).
-        lines: List[str] = []
+        # Group tokens into ~1000-char chunks for KenLM training.
+        # Stored as a list of lines for k-fold splitting.
+        self._train_lines: List[str] = []
         current: List[str] = []
         length = 0
         for tok in self.tokens:
             current.append(tok)
             length += len(tok.split()) + 1
             if length >= 1000:
-                lines.append(" ".join(current))
+                self._train_lines.append(" ".join(current))
                 current = []
                 length = 0
         if current:
-            lines.append(" ".join(current))
-        self._train_text: str = "\n".join(lines)
+            self._train_lines.append(" ".join(current))
 
         self._h3_cache: Optional[float] = None
 
@@ -1019,32 +982,77 @@ class EntropyCalculator(CorpusTools):
 
         return klm, tmp
 
+    _H3_FOLDS = 5  # Number of cross-validation folds
+
     def calculate_H3_kenlm(self) -> float:
         """
-        Character-level cross-entropy (bits/char) using a KenLM n-gram model.
+        Character-level cross-entropy (bits/char) via k-fold cross-validation.
 
-        Trained on continuous text chunks so the model learns cross-word
-        character dependencies. KenLM .score() returns log10(P); converted
-        to bits via / log10(2). Normalized by total character tokens T.
+        Splits the ~1000-char training chunks into k folds. For each fold,
+        trains a KenLM n-gram model on the other k-1 folds and scores the
+        held-out fold. The final H3 is the weighted average across folds
+        (weighted by number of character tokens in each held-out fold).
+
+        This avoids the train-on-test bias of evaluating on training data.
         """
         if self._h3_cache is not None:
             return self._h3_cache
 
-        if kenlm is None:
+        if kenlm is None:  # type: ignore[comparison-overlap]
             raise ImportError(
                 "KenLM is required for H3 calculation. "
                 "Install it with: pip install kenlm"
             )
-        model_path, tmp = self.train_kenlm_model(self._train_text)
+
+        lines = self._train_lines
+        n_folds = min(self._H3_FOLDS, len(lines))
+
+        if n_folds < 2:
+            # Too few chunks for cross-validation — fall back to train=test
+            return self._h3_single_pass("\n".join(lines), self._char_stream)
+
+        # Assign each line to a fold
+        fold_ids = [i % n_folds for i in range(len(lines))]
+
+        total_log2 = 0.0
+        total_chars = 0
+
+        for fold in range(n_folds):
+            train = "\n".join(
+                ln for i, ln in zip(fold_ids, lines) if i != fold
+            )
+            test = " ".join(ln for i, ln in zip(fold_ids, lines) if i == fold)
+            T = len(test.split())
+            if T == 0:
+                continue
+
+            model_path, tmp = self.train_kenlm_model(train)
+            try:
+                assert (
+                    kenlm is not None
+                ), "KenLM must be available at this point"
+                model = kenlm.Model(str(model_path))
+                fold_log10 = model.score(test, bos=False, eos=False)
+                total_log2 += fold_log10 / math.log10(2)
+                total_chars += T
+            finally:
+                shutil.rmtree(tmp, ignore_errors=True)
+
+        if total_chars == 0:
+            return 0.0
+
+        self._h3_cache = float(-total_log2 / total_chars)
+        return self._h3_cache
+
+    def _h3_single_pass(self, train_text: str, eval_text: str) -> float:
+        """Fallback H3 when corpus is too small for cross-validation."""
+        model_path, tmp = self.train_kenlm_model(train_text)
         try:
+            assert kenlm is not None, "KenLM must be available at this point"
             model = kenlm.Model(str(model_path))
-
-            # KenLM .score() returns total log10(P)
-            total_log10 = model.score(self._char_stream, bos=False, eos=False)
-            # Convert log10 → log2 (bits)
+            total_log10 = model.score(eval_text, bos=False, eos=False)
             total_log2 = total_log10 / math.log10(2)
-
-            T = len(self._char_stream.split())  # number of character tokens
+            T = len(eval_text.split())
             self._h3_cache = float(-total_log2 / max(1, T))
             return self._h3_cache
         finally:

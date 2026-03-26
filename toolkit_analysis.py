@@ -115,7 +115,8 @@ def basic_analysis(corpus_tools: CorpusTools) -> None:
 
     logger.info("\nFrequency Analysis:")
     logger.info(SUB_TINY)
-    top1 = corpus_tools.query_by_rank(1)
+    top1_result = corpus_tools.query_by_rank(1)
+    top1 = top1_result[0] if isinstance(top1_result, list) else top1_result
     logger.info(
         f"• Most Frequent Token:  '{top1['token']}' (Frequency: {top1['frequency']})"
     )
