@@ -10,6 +10,8 @@ from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import nltk  # type: ignore[import-untyped]
 import numpy as np

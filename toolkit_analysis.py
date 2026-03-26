@@ -78,19 +78,19 @@ def analyze_corpus(
 ) -> AdvancedTools:
     """
     Run the complete analysis suite on the tokenized corpus.
-    When shuffle=True, the flag is passed through so CorpusTools handles the shuffling,
-    and the same order is used consistently in AdvancedTools and EntropyCalculator.
+    Shuffling is used for CorpusTools/AdvancedTools (benefits Heaps' Law),
+    but EntropyCalculator always uses the original token order because
+    character n-gram entropy depends on natural word sequences.
     """
-    # BASIC: CorpusTools handles optional shuffling internally
     corpus_tools = CorpusTools(list(tokenized), shuffle_tokens=shuffle)
     basic_analysis(corpus_tools)
 
-    # ADVANCED: reuse the tokens in the order CorpusTools produced
     advanced_tools = AdvancedTools(corpus_tools.tokens)
     advanced_analysis(advanced_tools)
 
-    # ENTROPY: also reuse the same ordering
-    entropy_calculator = EntropyCalculator(corpus_tools.tokens)
+    # Entropy uses original (unshuffled) order — shuffling destroys the
+    # cross-word character context that KenLM's n-gram model relies on.
+    entropy_calculator = EntropyCalculator(list(tokenized))
     entropy_metrics(entropy_calculator)
 
     return advanced_tools
