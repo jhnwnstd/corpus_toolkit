@@ -182,6 +182,13 @@ def advanced_analysis(advanced_tools: AdvancedTools) -> None:
     q, s = advanced_tools.calculate_zipf_mandelbrot()
     logger.info(f"• Zipf-Mandelbrot q:    {q:.2f}")
     logger.info(f"• Zipf-Mandelbrot s:    {s:.2f}")
+    r_break, a1, a2, C = advanced_tools.calculate_double_power_law()
+    logger.info(
+        f"• Double Power Law α₁:  {a1:.2f} (core, ranks 1-{r_break:.0f})"
+    )
+    logger.info(
+        f"• Double Power Law α₂:  {a2:.2f} (tail, ranks >{r_break:.0f})"
+    )
 
 
 def entropy_metrics(entropy_calculator: EntropyCalculator) -> None:
@@ -219,6 +226,7 @@ def generate_plots(
         "heaps": cp.plot_heaps_law,
         "zipf": cp.plot_zipfs_law_fit,
         "zipf_mandelbrot": cp.plot_zipf_mandelbrot_fit,
+        "double_power_law": cp.plot_double_power_law_fit,
     }
 
     for plot_id in plots_to_generate:
@@ -237,7 +245,9 @@ def generate_plots(
 def _run_once(name: str) -> None:
     tokens = load_and_tokenize_corpus(name)
     adv = analyze_corpus(tokens)  # shuffle=True (default)
-    generate_plots(adv, name, ["heaps", "zipf", "zipf_mandelbrot"])
+    generate_plots(
+        adv, name, ["heaps", "zipf", "zipf_mandelbrot", "double_power_law"]
+    )
 
 
 if __name__ == "__main__":

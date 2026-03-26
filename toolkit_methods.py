@@ -10,9 +10,10 @@ from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
-import matplotlib
+import matplotlib  # noqa: E402
+
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt  # noqa: E402
 import nltk  # type: ignore[import-untyped]
 import numpy as np
 import regex as reg  # type: ignore[import-untyped]
@@ -397,6 +398,9 @@ class AdvancedTools(CorpusTools):
         self._zipf_alpha: Optional[float] = None
         self._heaps_params: Optional[Tuple[float, float]] = None
         self._zipf_mandelbrot_params: Optional[Tuple[float, float]] = None
+        self._double_power_law_params: Optional[
+            Tuple[float, float, float, float]
+        ] = None
         self.herdans_c_value: Optional[float] = None
 
     def yules_k(self) -> float:
@@ -695,6 +699,85 @@ class AdvancedTools(CorpusTools):
 
         return self._zipf_mandelbrot_params
 
+    def calculate_double_power_law(
+        self, verbose: bool = False
+    ) -> Tuple[float, float, float, float]:
+        """
+        Fit a piecewise (double) power law to the rank-frequency distribution.
+
+        Natural language typically shows two regimes: a flatter slope for
+        core vocabulary (ranks 1 to r_break) and a steeper slope for rare
+        vocabulary (ranks > r_break). The model is:
+
+            f(r) = C * r^(-alpha1)               for r <= r_break
+            f(r) = C * r_break^(alpha2-alpha1) * r^(-alpha2)  for r > r_break
+
+        ensuring continuity at r_break. Fitted by minimising frequency-weighted
+        log-space SSE via differential evolution.
+
+        Returns (r_break, alpha1, alpha2, C).
+        """
+        if self._double_power_law_params is not None:
+            return self._double_power_law_params
+
+        freqs = self._ranked_freqs
+        ranks = self._ranks
+        n = len(freqs)
+        log_freqs = np.log(freqs)
+        weights = freqs / freqs.sum()
+
+        def objective(params: np.ndarray) -> float:
+            r_break, a1, a2, C = params
+            if r_break < 2 or a1 <= 0 or a2 <= 0 or C <= 0:
+                return np.inf
+            log_pred = np.where(
+                ranks <= r_break,
+                np.log(C) - a1 * np.log(ranks),
+                np.log(C) + (a2 - a1) * np.log(r_break) - a2 * np.log(ranks),
+            )
+            return float(np.sum(weights * (log_freqs - log_pred) ** 2))
+
+        bounds = [
+            (max(20, n // 100), min(n // 2, 10000)),
+            (0.3, 1.5),
+            (0.8, 3.5),
+            (freqs[0] * 0.1, freqs[0] * 10),
+        ]
+        result = differential_evolution(
+            objective,
+            bounds=bounds,  # type: ignore[arg-type]
+            seed=42,
+            maxiter=500,
+            tol=1e-10,
+        )
+        r_break, a1, a2, C = result.x
+        self._double_power_law_params = (
+            float(r_break),
+            float(a1),
+            float(a2),
+            float(C),
+        )
+
+        if verbose:
+            print(
+                f"Double power law: r_break={r_break:.0f}, "
+                f"alpha1={a1:.4f}, alpha2={a2:.4f}, C={C:.1f}"
+            )
+        return self._double_power_law_params
+
+    def predict_double_power_law(self) -> np.ndarray:
+        """Return predicted frequencies from the fitted double power law."""
+        params = (
+            self._double_power_law_params or self.calculate_double_power_law()
+        )
+        r_break, a1, a2, C = params
+        ranks = self._ranks
+        return np.where(
+            ranks <= r_break,
+            C / np.power(ranks, a1),
+            C * (r_break ** (a2 - a1)) / np.power(ranks, a2),
+        )
+
     # ----------------------- Goodness-of-fit metrics ---------------------- #
 
     @staticmethod
@@ -767,6 +850,20 @@ class AdvancedTools(CorpusTools):
                 "R2": self._r_squared(vocab_sizes, pred_heaps),
                 "KS": self._ks_statistic(vocab_sizes, pred_heaps),
                 "RMSE": self._rmse(vocab_sizes, pred_heaps),
+            }
+
+        # --- Double power law ---
+        if self._double_power_law_params is not None:
+            pred_dpl = self.predict_double_power_law()
+            r_break, a1, a2, C = self._double_power_law_params
+            results["double_power_law"] = {
+                "r_break": r_break,
+                "alpha1": a1,
+                "alpha2": a2,
+                "C": C,
+                "R2": self._r_squared(freqs, pred_dpl),
+                "KS": self._ks_statistic(freqs, pred_dpl),
+                "RMSE": self._rmse(freqs, pred_dpl),
             }
 
         # --- Cross-consistency: beta * alpha ≈ 1.0 ---
@@ -1244,6 +1341,58 @@ class CorpusPlots:
 
         ax.legend()
         return self._save(fig, "zipf_mandelbrot_fit")
+
+    # ---------------------- Double power law plot ------------------------ #
+    def plot_double_power_law_fit(
+        self,
+        *,
+        top_n: Optional[int] = None,
+        stride: int = 1,
+        figsize: Tuple[int, int] = (12, 8),
+    ) -> Path:
+        params = self.analyzer.calculate_double_power_law()
+        r_break, a1, a2, C = params
+
+        ranks = self._ranks
+        y_emp = self._freqs_norm_max
+        pred = self.analyzer.predict_double_power_law()
+        y_fit = pred / pred[0]
+
+        x_sc, y_sc = self._downsample(ranks, y_emp, top_n=top_n, stride=stride)
+
+        fig, ax = self._new_axes(
+            "Double Power Law Fit", "Rank", "Normalized Frequency", figsize
+        )
+        ax.set_xscale("log")
+        ax.set_yscale("log")
+
+        ax.plot(
+            x_sc,
+            y_sc,
+            linestyle="none",
+            marker="o",
+            color="tab:blue",
+            markersize=3,
+            alpha=0.5,
+            label="Empirical",
+        )
+        ax.plot(
+            ranks,
+            y_fit,
+            color="tab:red",
+            linewidth=2,
+            label=f"DPL (α₁={a1:.3f}, α₂={a2:.3f}, break={r_break:.0f})",
+        )
+        ax.axvline(
+            r_break,
+            color="tab:gray",
+            linestyle="--",
+            alpha=0.6,
+            label=f"Regime break (r={r_break:.0f})",
+        )
+
+        ax.legend()
+        return self._save(fig, "double_power_law_fit")
 
     # ---------------------------- Heaps plot ---------------------------- #
     def plot_heaps_law(
