@@ -10,7 +10,6 @@ from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
-import matplotlib; matplotlib.use("Agg")  # noqa: E702,E402
 import matplotlib.pyplot as plt
 import nltk  # type: ignore[import-untyped]
 import numpy as np
@@ -19,6 +18,10 @@ import scipy.optimize as optimize
 from nltk.corpus import PlaintextCorpusReader, stopwords  # type: ignore[import-untyped]
 from nltk.tokenize import word_tokenize  # type: ignore[import-untyped]
 from scipy.optimize import curve_fit, differential_evolution
+
+import matplotlib
+
+matplotlib.use("Agg")  # noqa: E702,E402
 
 try:
     import kenlm  # type: ignore[import-not-found]
