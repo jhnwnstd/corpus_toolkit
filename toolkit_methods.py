@@ -705,8 +705,9 @@ class AdvancedTools(CorpusTools):
         )
 
         if local_result.success:
-            best_q, best_s = local_result.x
-            best_nll = local_result.fun
+            best_q = float(local_result.x[0])
+            best_s = float(local_result.x[1])
+            best_nll = float(local_result.fun)
         else:
             best_q, best_s, best_nll = q0, s0, nll(np.array([q0, s0]))
 
